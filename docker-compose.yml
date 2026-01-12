@@ -1,8 +1,10 @@
 # See NOTE comments for places to modify.
 services:
   traefik:
-    image: traefik:v3.3.1
+    # image: traefik:v3.3.1
+    image: traefik:v3.6
     command:
+      - "--providers.file.filename=/certificates/traefik_dynamic_conf.yml"
       # Swarm provider configuration
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
@@ -10,10 +12,28 @@ services:
       # This is set up for HTTP. If you want HTTPS support for production, use Docker Swarm
       # (check out swarm-deploy.yml) or ask ChatGPT to modify this file for you.
       - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.websecure.http.tls=true"
+      
+      - "--api.dashboard=true"
+      - "--api.insecure=false"
+      - "--log.level=INFO"
+      - "--accesslog=true"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`dashboard.docker.localhost`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.tls=true"
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./certificates:/certificates:ro"
 
   frontend:
     image: unmute-frontend:latest
@@ -25,7 +45,9 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
-      - "traefik.http.routers.frontend.entrypoints=web"
+      # - "traefik.http.routers.frontend.rule=Host(`thunder-ai.localhost`)"
+      - "traefik.http.routers.frontend.tls=true"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
       - "traefik.http.services.frontend.loadbalancer.server.port=3000"
       - "traefik.http.routers.frontend.priority=10" # lowest priority
 
@@ -47,17 +69,20 @@ services:
       - "traefik.http.routers.backend.middlewares=strip-api"
       - "traefik.http.middlewares.strip-api.replacepathregex.regex=^/api/(.*)"
       - "traefik.http.middlewares.strip-api.replacepathregex.replacement=/$$1"
-      - "traefik.http.routers.backend.entrypoints=web"
+      - "traefik.http.routers.backend.tls=true"
+      - "traefik.http.routers.backend.entrypoints=websecure"
       - "traefik.http.services.backend.loadbalancer.server.port=80"
       - "traefik.http.routers.backend.priority=100" # higher priority than frontend
       - "prometheus-port=80"
 
   tts:
-    image: moshi-server:latest
+    # image: moshi-server:latest
+    image: fcollonval/unmute-asr:latest
     command: ["worker", "--config", "configs/tts.toml"]
     build:
       context: services/moshi-server
-      dockerfile: public.Dockerfile
+      # dockerfile: public.Dockerfile
+      dockerfile: Dockerfile.vllm
     environment:
       - HUGGING_FACE_HUB_TOKEN=$HUGGING_FACE_HUB_TOKEN
     volumes:
@@ -76,11 +101,12 @@ services:
               capabilities: [gpu]
 
   stt:
-    image: moshi-server:latest
+    # image: moshi-server:latest
+    image: fcollonval/unmute-asr:latest
     command: ["worker", "--config", "configs/stt.toml"]
     build:
       context: services/moshi-server
-      dockerfile: public.Dockerfile
+      dockerfile: Dockerfile.vllm
     environment:
       - HUGGING_FACE_HUB_TOKEN=$HUGGING_FACE_HUB_TOKEN
     volumes:
@@ -99,12 +125,17 @@ services:
               capabilities: [gpu]
 
   llm:
-    image: vllm/vllm-openai:v0.11.0
+    # image: vllm/vllm-openai:v0.11.0
+    image: fcollonval/vllm-timm:latest
+    build:
+      context: services/llm
+      dockerfile: Dockerfile.vllm
     command:
       [
         # NOTE: Change the LLM here if you want.
         # (caution: gemma-3-1b-it also exists but it's slow on vLLM: https://github.com/vllm-project/vllm/issues/19575)
-        "--model=meta-llama/Llama-3.2-1B-Instruct",
+        # "--model=meta-llama/Llama-3.2-1B-Instruct",
+        "--model=google/gemma-3n-e2b-it",
         # NOTE: You can adapt this based on your GPU memory.
         # A higher value takes more memory but supports longer conversations.
         "--max-model-len=1536",

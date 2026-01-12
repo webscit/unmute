@@ -1,0 +1,4 @@
+tls:
+  certificates:
+  - certFile: /certificates/thunder-ai.localhost.pem
+    keyFile: /certificates/thunder-ai.localhost-key.pem

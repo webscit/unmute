@@ -1,0 +1,116 @@
+# This is the public-facing version.
+FROM ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor AS builder
+
+# Set environment variables to avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies, including dos2unix to handle Windows line endings
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    ca-certificates \
+    libssl-dev \
+    git \
+    pkg-config \
+    cmake \
+    wget \
+    openssh-client \
+    dos2unix \
+    --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
+
+# RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+# ENV PATH="/root/.cargo/bin:$PATH"
+
+# COPY --from=ghcr.io/astral-sh/uv:0.7.2 /uv /uvx /bin/
+
+WORKDIR /opt
+
+RUN git clone -b "mlx-0.3.0" https://github.com/kyutai-labs/moshi.git
+    # && git clone https://github.com/kyutai-labs/delayed-streams-modeling.git
+
+COPY Cargo.toml.patch /opt/moshi
+COPY pyproject.toml /opt/moshi/rust/moshi-server/
+
+RUN patch /opt/moshi/rust/Cargo.toml /opt/moshi/Cargo.toml.patch \
+    && cd /opt/moshi/rust \
+    && /root/.cargo/bin/cargo update cudarc --precise 0.17.3
+
+RUN mkdir -p /opt/moshi/rust/.cargo && \
+    mkdir -p /opt/moshi-server
+
+COPY cargo.toml /root/.cargo/config.toml
+
+WORKDIR /opt/moshi/rust
+# Fix for building bindgen_cuda as nvidia-sim cannot be used at build time
+# nvidia-smi --query-gpu=compute_cap --format=csv | replace(".", "")
+ENV CUDA_COMPUTE_CAP=110 PATH="/opt/moshi/rust/.venv/bin:$PATH"
+RUN uv venv --python 3.12.8 && \
+    /root/.cargo/bin/cargo build --features cuda -r --bin moshi-server --target-dir /opt/moshi-server && \
+    mv /opt/moshi-server/release/build /tmp/build-moshi-server
+# RUN /root/.cargo/bin/cargo install --features cuda --bin moshi-server --target-dir /opt/moshi-server
+
+RUN mkdir -p /opt/wheels && \
+    uv pip install pip maturin puccinialin "cmake<4" setuptools
+
+# RUN pip wheel --index-url https://download.pytorch.org/whl/cu130 --wheel-dir /opt/wheels torchaudio xformers && \
+RUN pip wheel --wheel-dir /opt/wheels --no-build-isolation sphn
+
+# Build moshi-server aka tts-python package
+RUN uv pip install --extra-index-url /opt/wheels sphn && \
+    pip wheel --wheel-dir /opt/wheels --no-build-isolation /opt/moshi/rust/moshi-server \
+    && ls -l /opt/wheels
+
+#
+#
+#
+FROM ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor AS app
+
+# Set environment variables to avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies, including dos2unix to handle Windows line endings
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    ca-certificates \
+    libssl-dev \
+    git \
+    pkg-config \
+    cmake \
+    wget \
+    openssh-client \
+    dos2unix \
+    --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/moshi-server/release /opt/moshi-server
+# COPY --from=builder /opt/delayed-streams-modeling/configs /opt/moshi-server/configs
+COPY --from=builder /opt/wheels /opt/wheels
+
+RUN uv pip install /opt/wheels/*.whl
+
+WORKDIR /app
+
+# When starting the container for the first time, we need to compile and download
+# everything, so disregarding healthcheck failure for 10 minutes is fine.
+# We have a volume storing the build cache, so subsequent starts will be faster.
+HEALTHCHECK --start-period=10m \
+    CMD curl --fail http://localhost:8080/api/build_info || exit 1
+
+EXPOSE 8080
+ENV RUST_BACKTRACE=1
+
+# RUN wget https://raw.githubusercontent.com/kyutai-labs/moshi/bf359af7694add34c13e65d2f009f0cb474d87cc/rust/moshi-server/pyproject.toml
+# RUN wget https://raw.githubusercontent.com/kyutai-labs/moshi/bf359af7694add34c13e65d2f009f0cb474d87cc/rust/moshi-server/uv.lock
+
+COPY ./start_moshi_server_public.sh .
+COPY ./configs ./configs
+
+# Ensure the startup script is runnable inside the container.
+# This prevents script errors that can happen if the project was cloned on Windows,
+# which uses a different text file format (CRLF) than the Linux environment in the container (LF).
+RUN dos2unix ./start_moshi_server_public.sh && chmod +x ./start_moshi_server_public.sh
+
+ENTRYPOINT ["uv", "run", "/app/start_moshi_server_public.sh"]
+# ENTRYPOINT ["uv", "run", "--locked", "--project", "./moshi-server", "./start_moshi_server_public.sh"]

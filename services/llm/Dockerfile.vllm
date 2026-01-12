@@ -1,0 +1,5 @@
+FROM ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor AS app
+
+RUN uv pip install timm
+
+ENTRYPOINT ["vllm", "serve"]

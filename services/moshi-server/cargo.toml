@@ -1,0 +1,5 @@
+[build]
+rustflags = [
+    "-Ctarget-feature=+fp16,+fhm"
+]
+
