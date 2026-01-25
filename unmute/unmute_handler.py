@@ -637,14 +637,24 @@ class UnmuteHandler(AsyncStreamHandler):
             logger.info("Long silence detected.")
             await self.add_chat_message_delta(USER_SILENCE_MARKER, "user")
 
-    async def update_session(self, session: ora.SessionConfig):
-        if session.instructions:
-            self.chatbot.set_instructions(session.instructions)
+    async def update_session(self, session: ora.Session | dict[str, Any]):
+        # Handle both Session objects and dict-based configs
+        if isinstance(session, dict):
+            instructions = session.get("instructions")
+            voice = session.get("voice")
+            allow_recording = session.get("allow_recording", True)
+        else:
+            instructions = session.instructions
+            voice = session.voice
+            allow_recording = session.allow_recording if session.allow_recording is not None else True
 
-        if session.voice:
-            self.tts_voice = session.voice
+        if instructions:
+            self.chatbot.set_instructions(instructions)
 
-        if not session.allow_recording and self.recorder:
+        if voice:
+            self.tts_voice = voice
+
+        if not allow_recording and self.recorder:
             await self.recorder.add_event("client", ora.SessionUpdate(session=session))
             await self.recorder.shutdown(keep_recording=False)
             self.recorder = None
