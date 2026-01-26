@@ -515,6 +515,171 @@ FixtureLoadError: Fixture validation failed
 - Relax constraints: Increase timeouts or use non-strict ordering
 - Review server logs for errors
 
+## CI Integration
+
+The conformance harness runs automatically in GitHub Actions on every push and pull request.
+
+### CI Jobs
+
+Three separate jobs validate different aspects:
+
+1. **realtime-conformance** - Core protocol compliance tests
+   - Validates event assertions, ordering, and timing
+   - Artifact: `conformance-report` (JSON)
+
+2. **realtime-fuzz** - Robustness testing
+   - Tests duplicate IDs, out-of-order events, malformed payloads
+   - Artifact: `fuzz-report` (JSON)
+
+3. **realtime-benchmark** - Latency validation
+   - Measures TTFT, STT flush, tool call RTT
+   - Thresholds: TTFT 1000ms, STT 300ms, Tool RTT 2000ms
+   - Artifact: `benchmark-report` (JSON)
+
+### Viewing CI Results
+
+**When a CI job fails:**
+
+1. Go to the Actions tab in GitHub
+2. Click the failed workflow run
+3. Click the failed job (e.g., "realtime-conformance")
+4. Scroll through logs to see which fixtures failed
+5. Download artifacts at the bottom of the workflow run page
+
+**Interpreting JSON artifacts:**
+
+```json
+{
+  "run_summary": {
+    "total_fixtures": 3,
+    "passed": 2,
+    "failed": 1,
+    "skipped": 0
+  },
+  "fixtures": [
+    {
+      "name": "text_only_basic",
+      "status": "FAILED",
+      "error_message": "Event assertion failed: expected 'response.done' but got 'error'",
+      "assertions": {
+        "events": {...},
+        "ordering": {...}
+      }
+    }
+  ]
+}
+```
+
+Key fields:
+- `run_summary` - High-level pass/fail counts
+- `fixtures[].status` - Per-fixture result (PASSED/FAILED/SKIPPED)
+- `fixtures[].error_message` - Failure reason
+- `fixtures[].assertions` - Detailed assertion results
+- `fixtures[].trace.server_events_received` - All events from server
+
+### Reproducing CI Failures Locally
+
+Use the developer script to reproduce any CI run:
+
+```bash
+# Reproduce full CI suite
+./scripts/run_realtime_harness.sh
+
+# Reproduce specific mode
+./scripts/run_realtime_harness.sh --mode conformance
+./scripts/run_realtime_harness.sh --mode fuzz
+./scripts/run_realtime_harness.sh --mode benchmark
+
+# Reproduce specific failed fixture
+./scripts/run_realtime_harness.sh --mode conformance --fixture text_only_basic
+
+# Match CI thresholds exactly
+./scripts/run_realtime_harness.sh --mode benchmark \
+  --ttft-threshold 1000 \
+  --stt-threshold 300 \
+  --tool-rtt-threshold 2000
+```
+
+The script outputs:
+- Color-coded pass/fail status
+- Timestamped JSON reports in `tests/realtime_harness/reports/`
+- Exit code 0 for success, 1 for failure (same as CI)
+
+### Debugging Failed CI Runs
+
+**Step-by-step debugging workflow:**
+
+1. **Identify the failure:**
+   - Check which CI job failed (conformance/fuzz/benchmark)
+   - Note the specific fixture name from logs
+
+2. **Download and inspect the artifact:**
+   ```bash
+   # Download from GitHub Actions UI, then:
+   cat conformance-report.json | jq '.fixtures[] | select(.status == "FAILED")'
+   ```
+
+3. **Reproduce locally:**
+   ```bash
+   ./scripts/run_realtime_harness.sh --mode conformance --fixture <failed_fixture>
+   ```
+
+4. **Analyze the trace:**
+   - Look at `server_events_received` in the JSON report
+   - Compare expected vs actual events
+   - Check event timestamps for timing issues
+
+5. **Run with external server for detailed logs:**
+   ```bash
+   # Terminal 1: Start server with verbose logging
+   uvicorn unmute.main_websocket:app --host 127.0.0.1 --port 8765 --log-level debug
+
+   # Terminal 2: Run harness against external server
+   ./scripts/run_realtime_harness.sh --no-server --port 8765 --fixture <failed_fixture>
+   ```
+
+6. **Common failure patterns:**
+
+   - **Event missing**: Server didn't emit expected event
+     - Check server logs for errors
+     - Verify feature is implemented
+
+   - **Wrong event order**: Events arrived in unexpected sequence
+     - Review async task scheduling
+     - Check if strict ordering is required
+
+   - **Timing assertion failed**: Event took too long
+     - Profile specific code path
+     - Check for blocking operations
+
+   - **Fuzz test failed**: Server crashed or hung on malformed input
+     - Add input validation
+     - Handle edge cases gracefully
+
+   - **Benchmark exceeded threshold**: Latency too high
+     - Run profiling tools
+     - Check for bottlenecks in pipeline
+
+### Adding Harness Tests for New Features
+
+When adding new OpenAI Realtime API features:
+
+1. Create fixture in `tests/realtime_harness/fixtures/`
+2. Test locally: `./scripts/run_realtime_harness.sh --fixture <new_fixture>`
+3. Commit fixture - CI will automatically test it
+4. If adding new event types, update validators in `validators.py`
+
+### CI Configuration
+
+CI configuration is in `.github/workflows/ci.yml`:
+
+- **Trigger**: Every push and pull request
+- **Runner**: ubuntu-latest
+- **Python**: Managed by uv (version 0.7.12)
+- **Timeout**: 30s per fixture (configurable in runner)
+- **Artifact retention**: 30 days
+- **Failures block merges**: Yes (required checks)
+
 ## License
 
 Part of the Unmute project. See main LICENSE file.
