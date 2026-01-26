@@ -35,11 +35,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import unmute.openai_realtime_api_events as ora
+from unmute.media_store import MediaStore
 
 
 @dataclass
 class SessionState:
     """Per-session state machine for OpenAI Realtime protocol."""
+
+    # Session configuration
+    session: ora.Session = field(default_factory=lambda: ora.Session())
 
     # Response tracking
     current_response: ora.Response | None = None
@@ -53,6 +57,14 @@ class SessionState:
     input_buffer_samples: int = 0
     input_buffer_committed: bool = False
     pending_audio_item_id: str | None = None
+
+    # Input image buffer state
+    pending_image_data: str | None = None  # Base64-encoded image
+    pending_image_format: str | None = None
+    pending_image_item_id: str | None = None
+
+    # Media storage
+    media_store: MediaStore = field(default_factory=MediaStore)
 
     # Output tracking - maps item_id to output_index in current response
     output_items_in_progress: dict[str, int] = field(default_factory=dict)
@@ -138,18 +150,6 @@ class SessionState:
         self.items[item_id] = item
         return item
 
-    def delete_item(self, item_id: str) -> bool:
-        """Delete an item from conversation. Returns True if item existed."""
-        if item_id not in self.items:
-            return False
-
-        del self.items[item_id]
-        try:
-            self.item_order.remove(item_id)
-        except ValueError:
-            pass
-        return True
-
     def get_item(self, item_id: str) -> ora.Item | None:
         """Retrieve an item by ID."""
         return self.items.get(item_id)
@@ -215,6 +215,132 @@ class SessionState:
             self.pending_audio_item_id = ora.random_id("item")
         return self.pending_audio_item_id
 
+    def append_image_buffer(self, image_b64: str, format: str | None = None) -> None:
+        """Append image data to the input image buffer.
+
+        Args:
+            image_b64: Base64-encoded image data.
+            format: Image format (jpeg, png, webp, gif). If None, will try to detect.
+        """
+        self.pending_image_data = image_b64
+        self.pending_image_format = format or "jpeg"
+
+    def commit_image_buffer(self) -> str:
+        """Commit image buffer and return the created item ID.
+
+        Stores the image in the media store and creates a conversation item.
+
+        Returns:
+            Item ID of the created image item.
+
+        Raises:
+            RuntimeError: If no image data is pending.
+            ValueError: If image storage fails.
+        """
+        if self.pending_image_data is None:
+            raise RuntimeError("No image data in buffer to commit")
+
+        # Generate IDs
+        item_id = self.pending_image_item_id or ora.random_id("item")
+        image_id = ora.random_id("img")
+
+        # Store image in media store
+        try:
+            self.media_store.store_image(
+                image_id=image_id,
+                format=self.pending_image_format or "jpeg",
+                data_b64=self.pending_image_data,
+                item_id=item_id,
+            )
+        except ValueError as e:
+            # Clear buffer and re-raise
+            self.clear_image_buffer()
+            raise e
+
+        # Create conversation item with image reference
+        image_url = self.media_store.get_image_url(image_id)
+        item = ora.Item(
+            id=item_id,
+            type="message",
+            role="user",
+            content=[{"type": "input_image", "image_url": {"url": image_url}}],
+            status="completed",
+        )
+        self.items[item_id] = item
+        self.item_order.append(item_id)
+
+        # Clear buffer
+        self.pending_image_data = None
+        self.pending_image_format = None
+        self.pending_image_item_id = None
+
+        return item_id
+
+    def clear_image_buffer(self) -> None:
+        """Clear input image buffer without committing."""
+        self.pending_image_data = None
+        self.pending_image_format = None
+        self.pending_image_item_id = None
+
+    def append_metadata(
+        self, key: str, value: Any, timestamp: float | None = None
+    ) -> str:
+        """Append metadata item to conversation.
+
+        Unlike images, metadata items are committed immediately without buffering.
+
+        Args:
+            key: Metadata key (e.g., "sensor.depth").
+            value: Metadata value.
+            timestamp: Optional timestamp.
+
+        Returns:
+            Item ID of the created metadata item.
+        """
+        item_id = ora.random_id("item")
+        metadata_id = ora.random_id("meta")
+
+        # Store in media store
+        self.media_store.store_metadata(
+            metadata_id=metadata_id,
+            key=key,
+            value=value,
+            timestamp=timestamp,
+            item_id=item_id,
+        )
+
+        # Create conversation item
+        item = ora.Item(
+            id=item_id,
+            type="message",
+            role="user",
+            content=[{"type": "metadata", "key": key, "value": value, "timestamp": timestamp}],
+            status="completed",
+        )
+        self.items[item_id] = item
+        self.item_order.append(item_id)
+
+        return item_id
+
+    def delete_item(self, item_id: str) -> bool:
+        """Delete an item from conversation and clean up associated media.
+
+        Returns True if item existed.
+        """
+        if item_id not in self.items:
+            return False
+
+        # Clean up associated media
+        self.media_store.cleanup_item_media(item_id)
+
+        # Delete item
+        del self.items[item_id]
+        try:
+            self.item_order.remove(item_id)
+        except ValueError:
+            pass
+        return True
+
     def snapshot(self) -> dict[str, Any]:
         """Create a serializable snapshot of session state for recording/replay."""
         return {
@@ -227,11 +353,19 @@ class SessionState:
             "input_buffer_samples": self.input_buffer_samples,
             "input_buffer_committed": self.input_buffer_committed,
             "pending_audio_item_id": self.pending_audio_item_id,
+            "pending_image_format": self.pending_image_format,
+            "pending_image_item_id": self.pending_image_item_id,
             "response_queue": list(self.response_queue),
+            "media_store": self.media_store.to_snapshot(),
+            "session": self.session.model_dump(),
         }
 
     def restore(self, snapshot: dict[str, Any]) -> None:
-        """Restore session state from a snapshot."""
+        """Restore session state from a snapshot.
+
+        Note: Media store restoration is partial - only references are restored,
+        not full image data. Clients must re-upload images after reconnect.
+        """
         self.items = {
             item_id: ora.Item(**item_data)
             for item_id, item_data in snapshot.get("items", {}).items()
@@ -242,16 +376,30 @@ class SessionState:
         self.input_buffer_samples = snapshot.get("input_buffer_samples", 0)
         self.input_buffer_committed = snapshot.get("input_buffer_committed", False)
         self.pending_audio_item_id = snapshot.get("pending_audio_item_id")
+        self.pending_image_format = snapshot.get("pending_image_format")
+        self.pending_image_item_id = snapshot.get("pending_image_item_id")
         self.response_queue = list(snapshot.get("response_queue", []))
+
+        # Restore session config
+        session_data = snapshot.get("session")
+        if session_data:
+            self.session = ora.Session(**session_data)
+
+        # Note: media_store is NOT fully restored - only metadata references
+        # Actual image data would need to be re-uploaded after reconnect
+        # This is intentional to avoid storing large amounts of binary data
 
         # Reset current response - would need to be re-established
         self.current_response = None
         self.output_items_in_progress.clear()
 
     def __repr__(self) -> str:
+        media_stats = self.media_store.get_storage_stats()
         return (
             f"SessionState("
             f"items={len(self.items)}, "
             f"response={'active' if self.current_response else 'none'}, "
-            f"buffer_samples={self.input_buffer_samples})"
+            f"buffer_samples={self.input_buffer_samples}, "
+            f"images={media_stats['num_images']}, "
+            f"metadata={media_stats['num_metadata']})"
         )

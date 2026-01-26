@@ -623,6 +623,125 @@ async def receive_loop(
             await handler.clear_audio_buffer()
             await emit_queue.put(ora.InputAudioBufferCleared())
 
+        # Input image buffer events
+        elif isinstance(message, ora.InputImageBufferAppend):
+            try:
+                # Validate base64 encoding
+                image_bytes = base64.b64decode(message.image)
+
+                # Check modalities support
+                modalities = handler.session_state.session.modalities
+                if modalities is not None and "image" not in modalities:
+                    await emit_queue.put(
+                        ora.Error(
+                            error=ora.ErrorDetails(
+                                type="invalid_request_error",
+                                code="modality_not_supported",
+                                message="Image modality not enabled in session",
+                            )
+                        )
+                    )
+                    continue
+
+                # Append to image buffer
+                handler.session_state.append_image_buffer(
+                    message.image, message.format
+                )
+                logger.info(f"Appended image: {len(image_bytes)} bytes, format={message.format}")
+
+            except Exception as e:
+                await emit_queue.put(
+                    ora.Error(
+                        error=ora.ErrorDetails(
+                            type="invalid_request_error",
+                            code="invalid_image",
+                            message=f"Invalid image data: {e}",
+                        )
+                    )
+                )
+                logger.error(f"Image append failed: {e}")
+
+        elif isinstance(message, ora.InputImageBufferCommit):
+            try:
+                item_id = handler.session_state.commit_image_buffer()
+                prev_id = handler.session_state.get_previous_item_id()
+                await emit_queue.put(
+                    ora.InputImageBufferCommitted(
+                        item_id=item_id, previous_item_id=prev_id
+                    )
+                )
+
+                # Create conversation item created event
+                item = handler.session_state.get_item(item_id)
+                if item:
+                    await emit_queue.put(
+                        ora.ConversationItemCreated(
+                            previous_item_id=prev_id,
+                            item=item,
+                        )
+                    )
+
+                logger.info(f"Committed image buffer: item_id={item_id}")
+
+            except RuntimeError as e:
+                await emit_queue.put(
+                    ora.Error(
+                        error=ora.ErrorDetails(
+                            type="invalid_request_error",
+                            code="no_image_data",
+                            message=str(e),
+                        )
+                    )
+                )
+            except ValueError as e:
+                await emit_queue.put(
+                    ora.Error(
+                        error=ora.ErrorDetails(
+                            type="invalid_request_error",
+                            code="image_storage_error",
+                            message=str(e),
+                        )
+                    )
+                )
+
+        elif isinstance(message, ora.InputImageBufferClear):
+            handler.session_state.clear_image_buffer()
+            await emit_queue.put(ora.InputImageBufferCleared())
+            logger.info("Cleared image buffer")
+
+        # Input metadata events
+        elif isinstance(message, ora.InputMetadataAppend):
+            try:
+                item_id = handler.session_state.append_metadata(
+                    key=message.key,
+                    value=message.value,
+                    timestamp=message.timestamp,
+                )
+                prev_id = handler.session_state.get_previous_item_id()
+
+                # Create conversation item created event
+                item = handler.session_state.get_item(item_id)
+                if item:
+                    await emit_queue.put(
+                        ora.ConversationItemCreated(
+                            previous_item_id=prev_id,
+                            item=item,
+                        )
+                    )
+
+                logger.info(f"Appended metadata: {message.key}={message.value}")
+
+            except ValueError as e:
+                await emit_queue.put(
+                    ora.Error(
+                        error=ora.ErrorDetails(
+                            type="invalid_request_error",
+                            code="metadata_storage_error",
+                            message=str(e),
+                        )
+                    )
+                )
+
         else:
             logger.info("Ignoring message:", str(message)[:100])
 

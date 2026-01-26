@@ -160,6 +160,42 @@ class InputAudioBufferSpeechStopped(
     audio_end_ms: int | None = None
 
 
+class InputImageBufferAppend(BaseEvent[Literal["input_image_buffer.append"]]):
+    """Append image data to the input image buffer."""
+    image: str  # Base64-encoded image data
+    format: Literal["jpeg", "png", "webp", "gif"] | None = None
+
+
+class InputImageBufferCommit(BaseEvent[Literal["input_image_buffer.commit"]]):
+    """Commit the input image buffer to create an image item."""
+    pass
+
+
+class InputImageBufferClear(BaseEvent[Literal["input_image_buffer.clear"]]):
+    """Clear the input image buffer."""
+    pass
+
+
+class InputImageBufferCommitted(
+    BaseEvent[Literal["input_image_buffer.committed"]]
+):
+    """Image buffer was committed (server event)."""
+    item_id: str
+    previous_item_id: str | None = None
+
+
+class InputImageBufferCleared(BaseEvent[Literal["input_image_buffer.cleared"]]):
+    """Input image buffer was cleared (server event)."""
+    pass
+
+
+class InputMetadataAppend(BaseEvent[Literal["input_metadata.append"]]):
+    """Append metadata item (sensor reading, structured context)."""
+    key: str
+    value: Any
+    timestamp: float | None = None
+
+
 class UsageStats(BaseModel):
     """Token usage statistics."""
     total_tokens: int = 0
@@ -197,6 +233,28 @@ class InputAudioContentPart(ContentPart):
     type: Literal["input_audio"] = "input_audio"
     audio: str | None = None  # Base64-encoded audio
     transcript: str | None = None
+
+
+class ImageContentPart(ContentPart):
+    """Image content part for assistant responses."""
+    type: Literal["image"] = "image"
+    image_url: dict[str, str] | None = None  # {"url": "data:image/..."}
+    detail: Literal["auto", "low", "high"] | None = None
+
+
+class InputImageContentPart(ContentPart):
+    """User image input content part."""
+    type: Literal["input_image"] = "input_image"
+    image_url: dict[str, str] | None = None  # {"url": "data:image/..."}
+    detail: Literal["auto", "low", "high"] | None = None
+
+
+class MetadataContentPart(ContentPart):
+    """Metadata content part for sensor readings and structured context."""
+    type: Literal["metadata"] = "metadata"
+    key: str
+    value: Any
+    timestamp: float | None = None  # Unix timestamp
 
 
 class FunctionCall(BaseModel):
@@ -515,6 +573,9 @@ ServerEvent = Union[
     InputAudioBufferCleared,
     InputAudioBufferSpeechStarted,
     InputAudioBufferSpeechStopped,
+    # Input image buffer events
+    InputImageBufferCommitted,
+    InputImageBufferCleared,
     # Transcription events
     ConversationItemInputAudioTranscriptionDelta,
     ConversationItemInputAudioTranscriptionCompleted,
@@ -554,6 +615,12 @@ ClientEvent = Union[
     InputAudioBufferAppend,
     InputAudioBufferCommit,
     InputAudioBufferClear,
+    # Input image buffer events
+    InputImageBufferAppend,
+    InputImageBufferCommit,
+    InputImageBufferClear,
+    # Input metadata events
+    InputMetadataAppend,
     # Conversation item events
     ConversationItemCreate,
     ConversationItemDelete,
