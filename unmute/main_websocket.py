@@ -539,10 +539,81 @@ async def receive_loop(
             )
             await emit_queue.put(ora.SessionUpdated(session=session_for_response))
 
+            # Record state snapshot after session update
+            if handler.recorder is not None:
+                await handler.recorder.add_state_snapshot(handler.session_state)
+
         elif isinstance(message, ora.UnmuteAdditionalOutputs):
             # Don't record this: it's a debugging message and can be verbose. Anything
             # important to store should be in the other event types.
             message_to_record = None
+
+        # Response control events
+        elif isinstance(message, ora.ResponseCreate):
+            await handler.handle_response_create(message)
+
+        elif isinstance(message, ora.ResponseCancel):
+            ack = await handler.handle_response_cancel()
+            if ack is not None:
+                await emit_queue.put(ack)
+
+        # Conversation item management events
+        elif isinstance(message, ora.ConversationItemCreate):
+            item, ack = await handler.handle_item_create(message)
+            await emit_queue.put(ack)
+            # Record state snapshot after item creation
+            if handler.recorder is not None:
+                await handler.recorder.add_state_snapshot(handler.session_state)
+
+        elif isinstance(message, ora.ConversationItemDelete):
+            ack = await handler.handle_item_delete(message.item_id)
+            await emit_queue.put(ack)
+            # Record state snapshot after item deletion
+            if handler.recorder is not None:
+                await handler.recorder.add_state_snapshot(handler.session_state)
+
+        elif isinstance(message, ora.ConversationItemRetrieve):
+            ack = handler.handle_item_retrieve(message.item_id)
+            if ack is not None:
+                await emit_queue.put(ack)
+            else:
+                await emit_queue.put(
+                    ora.Error(
+                        error=ora.ErrorDetails(
+                            type="invalid_request_error",
+                            code="item_not_found",
+                            message=f"Item '{message.item_id}' not found",
+                        )
+                    )
+                )
+
+        elif isinstance(message, ora.ConversationItemTruncate):
+            ack = await handler.handle_item_truncate(message)
+            if ack is not None:
+                await emit_queue.put(ack)
+            else:
+                await emit_queue.put(
+                    ora.Error(
+                        error=ora.ErrorDetails(
+                            type="invalid_request_error",
+                            code="item_not_found",
+                            message=f"Item '{message.item_id}' not found for truncation",
+                        )
+                    )
+                )
+
+        # Input audio buffer control events
+        elif isinstance(message, ora.InputAudioBufferCommit):
+            item_id, prev_id = await handler.commit_audio_buffer()
+            await emit_queue.put(
+                ora.InputAudioBufferCommitted(
+                    item_id=item_id, previous_item_id=prev_id
+                )
+            )
+
+        elif isinstance(message, ora.InputAudioBufferClear):
+            await handler.clear_audio_buffer()
+            await emit_queue.put(ora.InputAudioBufferCleared())
 
         else:
             logger.info("Ignoring message:", str(message)[:100])
