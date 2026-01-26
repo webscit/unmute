@@ -56,6 +56,14 @@ from unmute.tts.voice_donation import (
 )
 from unmute.tts.voices import VoiceList
 from unmute.unmute_handler import UnmuteHandler
+from unmute.websocket_auth import (
+    REALTIME_SUBPROTOCOL,
+    NegotiatedSession,
+    create_extension_error,
+    perform_handshake_validation,
+    reject_connection_with_error,
+    validate_extensions,
+)
 
 app = FastAPI()
 
@@ -290,6 +298,14 @@ async def post_voice_donation(
 @app.websocket("/v1/realtime")
 async def websocket_route(websocket: WebSocket):
     global _last_profile, _current_profile
+
+    # Perform handshake validation before accepting
+    valid, error = await perform_handshake_validation(websocket)
+    if not valid and error is not None:
+        logger.info(f"WebSocket handshake failed: {error.error.message}")
+        await reject_connection_with_error(websocket, error)
+        return
+
     mt.SESSIONS.inc()
     mt.ACTIVE_SESSIONS.inc()
     session_watch = Stopwatch()
@@ -311,12 +327,18 @@ async def websocket_route(websocket: WebSocket):
             # protocol(s) it supports and OpenAI uses "realtime" as the value. If we
             # don't set this, the client will think this is not the right endpoint and
             # will not connect.
-            await websocket.accept(subprotocol="realtime")
+            await websocket.accept(subprotocol=REALTIME_SUBPROTOCOL)
+
+            # Initialize session configuration for extension negotiation
+            negotiated_session = NegotiatedSession()
 
             handler = UnmuteHandler()
+            # Store negotiated session on handler for access during message handling
+            handler.negotiated_session = negotiated_session  # type: ignore[attr-defined]
+
             async with handler:
                 await handler.start_up()
-                await _run_route(websocket, handler)
+                await _run_route(websocket, handler, negotiated_session)
 
         except Exception as exc:
             await _report_websocket_exception(websocket, exc)
@@ -377,7 +399,11 @@ async def _report_websocket_exception(websocket: WebSocket, exc: Exception):
             logger.warning("Socket already closed.")
 
 
-async def _run_route(websocket: WebSocket, handler: UnmuteHandler):
+async def _run_route(
+    websocket: WebSocket,
+    handler: UnmuteHandler,
+    negotiated_session: NegotiatedSession,
+):
     health = await get_health()
     if not health.ok:
         logger.info("Health check failed, closing WebSocket connection.")
@@ -391,7 +417,8 @@ async def _run_route(websocket: WebSocket, handler: UnmuteHandler):
     try:
         async with asyncio.TaskGroup() as tg:
             tg.create_task(
-                receive_loop(websocket, handler, emit_queue), name="receive_loop()"
+                receive_loop(websocket, handler, emit_queue, negotiated_session),
+                name="receive_loop()",
             )
             tg.create_task(
                 emit_loop(websocket, handler, emit_queue), name="emit_loop()"
@@ -407,6 +434,7 @@ async def receive_loop(
     websocket: WebSocket,
     handler: UnmuteHandler,
     emit_queue: asyncio.Queue[ora.ServerEvent],
+    negotiated_session: NegotiatedSession,
 ):
     """Receive messages from the WebSocket.
 
@@ -476,8 +504,40 @@ async def receive_loop(
             if pcm.size:
                 await handler.receive((SAMPLE_RATE, pcm[np.newaxis, :]))
         elif isinstance(message, ora.SessionUpdate):
+            # Handle extension negotiation from session.update payload
+            session_dict = (
+                message.session
+                if isinstance(message.session, dict)
+                else message.session.model_dump()
+            )
+
+            # Check for requested extensions in the session config
+            requested_extensions = session_dict.get("unmute_extensions")
+            if requested_extensions:
+                accepted, rejected = validate_extensions(requested_extensions)
+                if rejected:
+                    # Send error for unsupported extensions
+                    error_event = create_extension_error(rejected)
+                    await emit_queue.put(error_event)
+                    logger.warning(
+                        f"Client requested unsupported extensions: {rejected}"
+                    )
+                # Update negotiated session with accepted extensions
+                negotiated_session.extensions = accepted
+                logger.info(f"Negotiated extensions: {accepted}")
+
+            # Update negotiated session with other config
+            negotiated_session.update_from_session(message.session)
+
             await handler.update_session(message.session)
-            await emit_queue.put(ora.SessionUpdated(session=message.session))
+
+            # Convert session to Session object if it's a dict for the response
+            session_for_response = (
+                ora.Session(**message.session)
+                if isinstance(message.session, dict)
+                else message.session
+            )
+            await emit_queue.put(ora.SessionUpdated(session=session_for_response))
 
         elif isinstance(message, ora.UnmuteAdditionalOutputs):
             # Don't record this: it's a debugging message and can be verbose. Anything
