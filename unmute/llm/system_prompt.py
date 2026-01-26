@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from unmute.llm.llm_utils import autoselect_model
 from unmute.llm.newsapi import get_news
 from unmute.llm.quiz_show_questions import QUIZ_SHOW_QUESTIONS
+from unmute.tooling.tool_schemas import register_tools_in_prompt
 
 _SYSTEM_PROMPT_BASICS = """
 You're in a speech conversation with a human user. Their text is being transcribed using
@@ -98,13 +99,16 @@ class ConstantInstructions(BaseModel):
     text: str = _DEFAULT_ADDITIONAL_INSTRUCTIONS
     language: LanguageCode | None = None
 
-    def make_system_prompt(self) -> str:
-        return _SYSTEM_PROMPT_TEMPLATE.format(
+    def make_system_prompt(self, include_tools: list[str] | None = None) -> str:
+        base_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
             _SYSTEM_PROMPT_BASICS=_SYSTEM_PROMPT_BASICS,
             additional_instructions=self.text,
             language_instructions=LANGUAGE_CODE_TO_INSTRUCTIONS[self.language],
             llm_name=get_readable_llm_name(),
         )
+        if include_tools is not None:
+            return register_tools_in_prompt(base_prompt, include_tools)
+        return base_prompt
 
 
 SMALLTALK_INSTRUCTIONS = """
@@ -154,6 +158,7 @@ class SmalltalkInstructions(BaseModel):
     def make_system_prompt(
         self,
         additional_instructions: str = _DEFAULT_ADDITIONAL_INSTRUCTIONS,
+        include_tools: list[str] | None = None,
     ) -> str:
         additional_instructions = SMALLTALK_INSTRUCTIONS.format(
             additional_instructions=additional_instructions,
@@ -164,12 +169,15 @@ class SmalltalkInstructions(BaseModel):
             ),
         )
 
-        return _SYSTEM_PROMPT_TEMPLATE.format(
+        base_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
             _SYSTEM_PROMPT_BASICS=_SYSTEM_PROMPT_BASICS,
             additional_instructions=additional_instructions,
             language_instructions=LANGUAGE_CODE_TO_INSTRUCTIONS[self.language],
             llm_name=get_readable_llm_name(),
         )
+        if include_tools is not None:
+            return register_tools_in_prompt(base_prompt, include_tools)
+        return base_prompt
 
 
 GUESS_ANIMAL_INSTRUCTIONS = """
@@ -232,18 +240,21 @@ class GuessAnimalInstructions(BaseModel):
     type: Literal["guess_animal"] = "guess_animal"
     language: LanguageCode | None = None
 
-    def make_system_prompt(self) -> str:
+    def make_system_prompt(self, include_tools: list[str] | None = None) -> str:
         additional_instructions = GUESS_ANIMAL_INSTRUCTIONS.format(
             animal_easy=random.choice(ANIMALS_EASY),
             animal_hard=random.choice(ANIMALS_HARD),
         )
 
-        return _SYSTEM_PROMPT_TEMPLATE.format(
+        base_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
             _SYSTEM_PROMPT_BASICS=_SYSTEM_PROMPT_BASICS,
             additional_instructions=additional_instructions,
             language_instructions=LANGUAGE_CODE_TO_INSTRUCTIONS[self.language],
             llm_name=get_readable_llm_name(),
         )
+        if include_tools is not None:
+            return register_tools_in_prompt(base_prompt, include_tools)
+        return base_prompt
 
 
 QUIZ_SHOW_INSTRUCTIONS = """
@@ -271,7 +282,7 @@ class QuizShowInstructions(BaseModel):
     type: Literal["quiz_show"] = "quiz_show"
     language: LanguageCode | None = None
 
-    def make_system_prompt(self) -> str:
+    def make_system_prompt(self, include_tools: list[str] | None = None) -> str:
         additional_instructions = QUIZ_SHOW_INSTRUCTIONS.format(
             questions="\n".join(
                 f"{i + 1}. {question} ({answer})"
@@ -281,12 +292,15 @@ class QuizShowInstructions(BaseModel):
             ),
         )
 
-        return _SYSTEM_PROMPT_TEMPLATE.format(
+        base_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
             _SYSTEM_PROMPT_BASICS=_SYSTEM_PROMPT_BASICS,
             additional_instructions=additional_instructions,
             language_instructions=LANGUAGE_CODE_TO_INSTRUCTIONS[self.language],
             llm_name=get_readable_llm_name(),
         )
+        if include_tools is not None:
+            return register_tools_in_prompt(base_prompt, include_tools)
+        return base_prompt
 
 
 NEWS_INSTRUCTIONS = """
@@ -309,7 +323,7 @@ class NewsInstructions(BaseModel):
     type: Literal["news"] = "news"
     language: LanguageCode | None = None
 
-    def make_system_prompt(self) -> str:
+    def make_system_prompt(self, include_tools: list[str] | None = None) -> str:
         news = get_news()
 
         if not news:
@@ -318,13 +332,14 @@ class NewsInstructions(BaseModel):
                 additional_instructions=_DEFAULT_ADDITIONAL_INSTRUCTIONS
                 + "\n\nYou were supposed to talk about the news, but there was an error "
                 "and you couldn't retrieve it. Explain and offer to talk about something else.",
+                include_tools=include_tools,
             )
 
         articles = news.articles[:10]
         random.shuffle(articles)  # to avoid bias of the LLM
         articles_serialized = json.dumps([article.model_dump() for article in articles])
 
-        return _SYSTEM_PROMPT_TEMPLATE.format(
+        base_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
             _SYSTEM_PROMPT_BASICS=_SYSTEM_PROMPT_BASICS,
             additional_instructions=NEWS_INSTRUCTIONS.format(
                 news=articles_serialized,
@@ -334,6 +349,9 @@ class NewsInstructions(BaseModel):
             language_instructions=LANGUAGE_CODE_TO_INSTRUCTIONS[self.language],
             llm_name=get_readable_llm_name(),
         )
+        if include_tools is not None:
+            return register_tools_in_prompt(base_prompt, include_tools)
+        return base_prompt
 
 
 UNMUTE_EXPLANATION_INSTRUCTIONS = """
@@ -362,13 +380,16 @@ The voice cloning model is not open-sourced directly, but we have a large databa
 class UnmuteExplanationInstructions(BaseModel):
     type: Literal["unmute_explanation"] = "unmute_explanation"
 
-    def make_system_prompt(self) -> str:
-        return _SYSTEM_PROMPT_TEMPLATE.format(
+    def make_system_prompt(self, include_tools: list[str] | None = None) -> str:
+        base_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
             _SYSTEM_PROMPT_BASICS=_SYSTEM_PROMPT_BASICS,
             additional_instructions=UNMUTE_EXPLANATION_INSTRUCTIONS,
             language_instructions=LANGUAGE_CODE_TO_INSTRUCTIONS["en"],
             llm_name=get_readable_llm_name(),
         )
+        if include_tools is not None:
+            return register_tools_in_prompt(base_prompt, include_tools)
+        return base_prompt
 
 
 Instructions = Annotated[

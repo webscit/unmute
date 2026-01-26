@@ -41,6 +41,7 @@ from unmute.service_discovery import find_instance
 from unmute.session_state import SessionState
 from unmute.stt.speech_to_text import SpeechToText, STTMarkerMessage
 from unmute.timer import Stopwatch
+from unmute.tooling.tool_schemas import get_tool_schemas, validate_and_parse_tool_call
 from unmute.tts.text_to_speech import (
     TextToSpeech,
     TTSAudioMessage,
@@ -962,22 +963,64 @@ class UnmuteHandler(AsyncStreamHandler):
                     texts.append(transcript)
         return " ".join(texts)
 
+    def validate_tool_call(self, tool_name: str, arguments_json: str) -> BaseModel:
+        """Validate and parse a tool call into a typed dataclass.
+
+        Args:
+            tool_name: Name of the tool being called.
+            arguments_json: JSON string containing the tool arguments.
+
+        Returns:
+            Validated Pydantic model instance for the tool's arguments.
+
+        Raises:
+            ValueError: If tool_name is unknown or arguments are invalid.
+        """
+        return validate_and_parse_tool_call(tool_name, arguments_json)
+
     async def update_session(self, session: ora.Session | dict[str, Any]):
         # Handle both Session objects and dict-based configs
         if isinstance(session, dict):
             instructions = session.get("instructions")
             voice = session.get("voice")
             allow_recording = session.get("allow_recording", True)
+            tools = session.get("tools")
+            tool_choice = session.get("tool_choice")
         else:
             instructions = session.instructions
             voice = session.voice
             allow_recording = session.allow_recording if session.allow_recording is not None else True
+            tools = session.tools
+            tool_choice = session.tool_choice
 
         if instructions:
             self.chatbot.set_instructions(instructions)
 
         if voice:
             self.tts_voice = voice
+
+        # Configure tools - validate tool schemas if provided
+        if tools is not None:
+            # Validate that provided tools match known schemas
+            known_tool_schemas = {t["name"]: t for t in get_tool_schemas()}
+            validated_tools = []
+
+            for tool_config in tools:
+                tool_name = tool_config.get("name")
+                if tool_name not in known_tool_schemas:
+                    logger.warning(
+                        f"Unknown tool '{tool_name}' in session config, ignoring"
+                    )
+                    continue
+                # Use canonical schema definition
+                validated_tools.append(known_tool_schemas[tool_name])
+
+            self.session_state.session.tools = validated_tools
+            logger.info(f"Configured {len(validated_tools)} tools for session")
+
+        if tool_choice is not None:
+            self.session_state.session.tool_choice = tool_choice
+            logger.info(f"Tool choice set to: {tool_choice}")
 
         if not allow_recording and self.recorder:
             await self.recorder.add_event("client", ora.SessionUpdate(session=session))
