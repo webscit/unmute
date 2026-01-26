@@ -559,3 +559,386 @@ class TestProtocolValidator:
         assert result.passed is True
         assert result.total_assertions == 3
         assert result.passed_assertions == 3
+
+
+class TestFuzzGenerators:
+    """Test fuzz generator functionality."""
+
+    def test_duplicate_id_fuzzer(self):
+        """Test duplicate ID fuzzer mutates event IDs."""
+        from tests.realtime_harness.fuzz_generators import DuplicateIDFuzzer
+
+        fixture = self._create_base_fixture()
+        fuzzer = DuplicateIDFuzzer(duplicate_probability=1.0)
+        mutated = fuzzer.mutate_fixture(fixture)
+
+        # Check mutation applied
+        assert mutated.metadata.name != fixture.metadata.name
+        assert "fuzz" in mutated.metadata.tags
+        assert "duplicate_ids" in mutated.metadata.tags
+
+        # Check error assertion added
+        error_assertions = [
+            a for a in mutated.event_assertions if a.event_type == "error"
+        ]
+        assert len(error_assertions) > 0
+
+    def test_out_of_order_fuzzer(self):
+        """Test out-of-order fuzzer shuffles events."""
+        from tests.realtime_harness.fuzz_generators import OutOfOrderFuzzer
+
+        fixture = self._create_base_fixture()
+        original_order = [e.event.get("type") for e in fixture.client_events]
+
+        fuzzer = OutOfOrderFuzzer(shuffle_intensity=1.0)
+        mutated = fuzzer.mutate_fixture(fixture)
+
+        # Check mutation applied
+        assert "out_of_order" in mutated.metadata.tags
+        assert mutated.timing_mode == "immediate"
+
+        # Check ordering assertions relaxed
+        for ordering in mutated.ordering_assertions:
+            assert ordering.strict is False
+
+    def test_invalid_tool_output_fuzzer(self):
+        """Test invalid tool output fuzzer corrupts tool responses."""
+        from tests.realtime_harness.fuzz_generators import InvalidToolOutputFuzzer
+
+        fixture = self._create_fixture_with_tool_call()
+        fuzzer = InvalidToolOutputFuzzer()
+        mutated = fuzzer.mutate_fixture(fixture)
+
+        # Check mutation applied
+        assert "invalid_tool_output" in mutated.metadata.tags
+
+        # Check error assertion added
+        error_assertions = [
+            a for a in mutated.event_assertions if a.event_type == "error"
+        ]
+        assert len(error_assertions) > 0
+
+    def test_malformed_payload_fuzzer(self):
+        """Test malformed payload fuzzer corrupts event structures."""
+        from tests.realtime_harness.fuzz_generators import MalformedPayloadFuzzer
+
+        fixture = self._create_base_fixture()
+        fuzzer = MalformedPayloadFuzzer()
+        mutated = fuzzer.mutate_fixture(fixture)
+
+        # Check mutation applied
+        assert "malformed" in mutated.metadata.tags
+
+        # Check error assertion added
+        error_assertions = [
+            a for a in mutated.event_assertions if a.event_type == "error"
+        ]
+        assert len(error_assertions) > 0
+
+        # Check other assertions cleared
+        assert len(mutated.ordering_assertions) == 0
+        assert len(mutated.timing_assertions) == 0
+
+    def test_fuzz_campaign(self):
+        """Test fuzz campaign generates multiple variants."""
+        from tests.realtime_harness.fuzz_generators import FuzzCampaign
+
+        base_fixtures = [self._create_base_fixture()]
+        campaign = FuzzCampaign()
+
+        fuzzed = campaign.generate_fuzzed_fixtures(base_fixtures)
+
+        # Should generate one variant per strategy
+        assert len(fuzzed) >= 4  # At least 4 strategies
+
+        # Each should have unique name
+        names = [f.metadata.name for f in fuzzed]
+        assert len(names) == len(set(names))
+
+    def test_fuzz_campaign_with_strategy_filter(self):
+        """Test fuzz campaign with specific strategies."""
+        from tests.realtime_harness.fuzz_generators import FuzzCampaign
+
+        base_fixtures = [self._create_base_fixture()]
+        campaign = FuzzCampaign()
+
+        fuzzed = campaign.generate_fuzzed_fixtures(
+            base_fixtures, strategies=["duplicate_ids"]
+        )
+
+        # Should only have duplicate_ids variants
+        assert len(fuzzed) == 1
+        assert "duplicate_ids" in fuzzed[0].metadata.tags
+
+    def test_predefined_edge_cases(self):
+        """Test predefined edge case fixtures."""
+        from tests.realtime_harness.fuzz_generators import get_predefined_edge_cases
+
+        edge_cases = get_predefined_edge_cases()
+
+        assert len(edge_cases) > 0
+        for fixture in edge_cases:
+            assert fixture.metadata.category == FixtureEventType.ERROR_HANDLING
+            assert "edge_case" in fixture.metadata.tags
+
+    def test_create_edge_case_fixture(self):
+        """Test edge case fixture creation helper."""
+        from tests.realtime_harness.fuzz_generators import create_edge_case_fixture
+
+        fixture = create_edge_case_fixture(
+            name="test_edge",
+            description="Test edge case",
+            client_events=[{"type": "test", "event_id": ""}],
+            expect_error=True,
+        )
+
+        assert fixture.metadata.name == "test_edge"
+        assert len(fixture.client_events) == 1
+        assert len(fixture.event_assertions) > 0
+
+    def _create_base_fixture(self):
+        """Helper to create a base fixture for testing."""
+        return TraceFixture(
+            metadata=FixtureMetadata(
+                name="test_base",
+                description="Base fixture",
+                category=FixtureEventType.TEXT_ONLY,
+                tags=["test"],
+            ),
+            timing_mode=TimingMode.RELATIVE,
+            client_events=[
+                ClientEvent(
+                    event={"type": "session.update", "event_id": "evt1"},
+                    delay_ms=0,
+                ),
+                ClientEvent(
+                    event={"type": "conversation.item.create", "event_id": "evt2"},
+                    delay_ms=100,
+                ),
+            ],
+            event_assertions=[
+                EventAssertion(event_type="session.created"),
+            ],
+            ordering_assertions=[
+                OrderingAssertion(
+                    before="session.created",
+                    after="conversation.item.created",
+                    strict=True,
+                )
+            ],
+        )
+
+    def _create_fixture_with_tool_call(self):
+        """Helper to create fixture with tool call for testing."""
+        return TraceFixture(
+            metadata=FixtureMetadata(
+                name="test_tool_call",
+                description="Tool call fixture",
+                category=FixtureEventType.TOOL_CALL,
+                tags=["test"],
+            ),
+            timing_mode=TimingMode.RELATIVE,
+            client_events=[
+                ClientEvent(
+                    event={
+                        "type": "conversation.item.create",
+                        "item": {
+                            "type": "function_call_output",
+                            "output": "result",
+                        },
+                    },
+                    delay_ms=0,
+                ),
+            ],
+        )
+
+
+class TestBenchmarks:
+    """Test latency benchmarking functionality."""
+
+    def test_benchmark_thresholds_defaults(self):
+        """Test benchmark thresholds have sensible defaults."""
+        from tests.realtime_harness.benchmarks import BenchmarkThresholds
+
+        thresholds = BenchmarkThresholds()
+
+        assert thresholds.ttft_ms == 1000
+        assert thresholds.stt_flush_ms == 300
+        assert thresholds.tool_call_rtt_ms == 2000
+        assert thresholds.actuator_rtt_ms == 500
+
+    def test_latency_measurement(self):
+        """Test single latency measurement."""
+        from tests.realtime_harness.benchmarks import LatencyBenchmarker
+
+        trace = self._create_trace_with_events([
+            ("response.created", 0.0),
+            ("response.text.delta", 0.5),
+        ])
+
+        benchmarker = LatencyBenchmarker()
+        measurement = benchmarker.measure_latency(
+            trace, "response.created", "response.text.delta", "TTFT", 1000
+        )
+
+        assert measurement is not None
+        assert measurement.name == "TTFT"
+        assert measurement.latency_ms == 500.0
+        assert measurement.passed is True
+
+    def test_latency_measurement_exceeds_threshold(self):
+        """Test latency measurement fails when exceeding threshold."""
+        from tests.realtime_harness.benchmarks import LatencyBenchmarker
+
+        trace = self._create_trace_with_events([
+            ("response.created", 0.0),
+            ("response.text.delta", 1.5),
+        ])
+
+        benchmarker = LatencyBenchmarker()
+        measurement = benchmarker.measure_latency(
+            trace, "response.created", "response.text.delta", "TTFT", 1000
+        )
+
+        assert measurement is not None
+        assert measurement.latency_ms == 1500.0
+        assert measurement.passed is False
+
+    def test_latency_measurement_missing_events(self):
+        """Test latency measurement returns None for missing events."""
+        from tests.realtime_harness.benchmarks import LatencyBenchmarker
+
+        trace = self._create_trace_with_events([
+            ("response.created", 0.0),
+        ])
+
+        benchmarker = LatencyBenchmarker()
+        measurement = benchmarker.measure_latency(
+            trace, "response.created", "missing.event", "test", 1000
+        )
+
+        assert measurement is None
+
+    def test_measure_ttft(self):
+        """Test TTFT measurement."""
+        from tests.realtime_harness.benchmarks import LatencyBenchmarker
+
+        trace = self._create_trace_with_events([
+            ("response.created", 0.0),
+            ("response.text.delta", 0.3),
+        ])
+
+        benchmarker = LatencyBenchmarker()
+        measurement = benchmarker.measure_ttft(trace)
+
+        assert measurement is not None
+        assert measurement.name == "TTFT_text"
+        assert measurement.latency_ms == 300.0
+
+    def test_measure_stt_flush(self):
+        """Test STT flush latency measurement."""
+        from tests.realtime_harness.benchmarks import LatencyBenchmarker
+
+        trace = self._create_trace_with_events([
+            ("input_audio_buffer.committed", 0.0),
+            ("conversation.item.input_audio_transcription.completed", 0.25),
+        ])
+
+        benchmarker = LatencyBenchmarker()
+        measurement = benchmarker.measure_stt_flush(trace)
+
+        assert measurement is not None
+        assert measurement.name == "STT_flush"
+        assert measurement.latency_ms == 250.0
+
+    def test_benchmark_trace(self):
+        """Test benchmarking complete trace."""
+        from tests.realtime_harness.benchmarks import LatencyBenchmarker
+
+        trace = self._create_trace_with_events([
+            ("response.created", 0.0),
+            ("response.text.delta", 0.3),
+            ("input_audio_buffer.committed", 1.0),
+            ("conversation.item.input_audio_transcription.completed", 1.2),
+        ])
+
+        benchmarker = LatencyBenchmarker()
+        result = benchmarker.benchmark_trace(trace, "test_fixture")
+
+        assert result.fixture_name == "test_fixture"
+        assert result.total_measurements >= 2  # TTFT and STT
+        assert result.passed_measurements >= 0
+        assert len(result.measurements) >= 2
+
+    def test_benchmark_runner(self):
+        """Test benchmark runner with multiple traces."""
+        from tests.realtime_harness.benchmarks import BenchmarkRunner
+
+        traces = [
+            (
+                self._create_trace_with_events([
+                    ("response.created", 0.0),
+                    ("response.text.delta", 0.3),
+                ]),
+                "fixture1",
+            ),
+            (
+                self._create_trace_with_events([
+                    ("response.created", 0.0),
+                    ("response.text.delta", 0.5),
+                ]),
+                "fixture2",
+            ),
+        ]
+
+        runner = BenchmarkRunner()
+        report = runner.run_benchmarks(traces)
+
+        assert report.total_fixtures == 2
+        assert len(report.benchmark_results) == 2
+        assert report.timestamp is not None
+
+    def test_benchmark_report_formatting(self):
+        """Test benchmark report formatting."""
+        from tests.realtime_harness.benchmarks import BenchmarkRunner
+
+        traces = [
+            (
+                self._create_trace_with_events([
+                    ("response.created", 0.0),
+                    ("response.text.delta", 0.3),
+                ]),
+                "test_fixture",
+            ),
+        ]
+
+        runner = BenchmarkRunner()
+        report = runner.run_benchmarks(traces)
+        formatted = runner.format_report(report)
+
+        assert "LATENCY BENCHMARK REPORT" in formatted
+        assert "test_fixture" in formatted
+        assert "Thresholds:" in formatted
+
+    def _create_trace_with_events(self, events):
+        """Helper to create trace with specific events.
+
+        Args:
+            events: List of (event_type, timestamp) tuples
+        """
+        trace = ReplayTrace(
+            fixture_name="test",
+            start_time=0.0,
+            end_time=max(t for _, t in events) if events else 1.0,
+        )
+
+        trace.received_events = [
+            ReceivedEvent(
+                event={"type": event_type},
+                timestamp_ms=timestamp * 1000,
+                event_type=event_type,
+            )
+            for event_type, timestamp in events
+        ]
+
+        return trace

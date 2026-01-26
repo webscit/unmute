@@ -24,6 +24,11 @@ class ReceivedEvent:
     timestamp_ms: float  # Milliseconds since trace start
     event_type: str
 
+    @property
+    def timestamp(self) -> float:
+        """Timestamp in seconds since trace start."""
+        return self.timestamp_ms / 1000.0
+
 
 @dataclass
 class ReplayTrace:

@@ -18,11 +18,20 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from tests.realtime_harness.benchmarks import (
+    BenchmarkReport,
+    BenchmarkRunner,
+    BenchmarkThresholds,
+)
 from tests.realtime_harness.fixture_parser import FixtureParser
 from tests.realtime_harness.fixture_schema import (
     FixtureEventType,
     FixtureResult,
     HarnessReport,
+)
+from tests.realtime_harness.fuzz_generators import (
+    FuzzCampaign,
+    get_predefined_edge_cases,
 )
 from tests.realtime_harness.validators import ProtocolValidator
 from tests.realtime_harness.websocket_replayer import WebSocketReplayer
@@ -271,6 +280,185 @@ class HarnessRunner:
 
         return report
 
+    async def run_fuzz_campaign(
+        self,
+        base_fixtures: Optional[list[str]] = None,
+        strategies: Optional[list[str]] = None,
+        include_edge_cases: bool = True,
+    ) -> HarnessReport:
+        """Run fuzz campaign on base fixtures.
+
+        Args:
+            base_fixtures: List of base fixture names to fuzz (None = all)
+            strategies: List of fuzz strategy names to apply (None = all)
+            include_edge_cases: Whether to include predefined edge cases
+
+        Returns:
+            Harness report with fuzz test results
+        """
+        start_time = time.time()
+
+        # Load base fixtures
+        if base_fixtures:
+            fixtures = [self.parser.load_fixture(name) for name in base_fixtures]
+        else:
+            fixtures = self.parser.load_all_fixtures()
+
+        # Generate fuzzed fixtures
+        campaign = FuzzCampaign()
+        fuzzed_fixtures = campaign.generate_fuzzed_fixtures(fixtures, strategies)
+
+        # Add edge cases
+        if include_edge_cases:
+            fuzzed_fixtures.extend(get_predefined_edge_cases())
+
+        if not fuzzed_fixtures:
+            console.print("[yellow]No fuzzed fixtures generated[/yellow]")
+            return HarnessReport(
+                timestamp=datetime.now().isoformat(),
+                total_fixtures=0,
+                fixtures_passed=0,
+                fixtures_failed=0,
+                total_duration_ms=0,
+                fixture_results=[],
+            )
+
+        console.print(f"\n[bold]Running {len(fuzzed_fixtures)} fuzzed fixture(s)...[/bold]\n")
+
+        # Run fuzzed fixtures
+        results = []
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            for fixture in fuzzed_fixtures:
+                task = progress.add_task(
+                    f"Running {fixture.metadata.name}...", total=None
+                )
+
+                # Replay fixture
+                try:
+                    replayer = WebSocketReplayer(base_url=self.ws_base_url)
+                    trace = await replayer.replay_fixture(fixture)
+
+                    # Validate trace
+                    validator = ProtocolValidator(fixture, trace)
+                    validation_result = validator.validate_all()
+
+                    result = FixtureResult(
+                        fixture_name=fixture.metadata.name,
+                        passed=validation_result.passed,
+                        duration_ms=(time.time() - start_time) * 1000,
+                        assertions_passed=validation_result.passed_assertions,
+                        assertions_failed=validation_result.failed_assertions,
+                        failures=validation_result.failure_messages,
+                        warnings=validation_result.warning_messages,
+                        server_events_received=len(trace.received_events),
+                    )
+
+                    if trace.errors:
+                        result.passed = False
+                        result.failures.extend(trace.errors)
+
+                except Exception as e:
+                    result = FixtureResult(
+                        fixture_name=fixture.metadata.name,
+                        passed=False,
+                        duration_ms=0,
+                        assertions_passed=0,
+                        assertions_failed=0,
+                        failures=[f"Fuzz fixture error: {str(e)}"],
+                    )
+
+                results.append(result)
+
+                status = "[green]✓[/green]" if result.passed else "[red]✗[/red]"
+                progress.update(
+                    task,
+                    description=f"{status} {fixture.metadata.name} ({result.duration_ms:.0f}ms)",
+                    completed=True,
+                )
+
+        # Generate report
+        total_duration_ms = (time.time() - start_time) * 1000
+        passed_count = sum(1 for r in results if r.passed)
+        failed_count = len(results) - passed_count
+
+        report = HarnessReport(
+            timestamp=datetime.now().isoformat(),
+            total_fixtures=len(results),
+            fixtures_passed=passed_count,
+            fixtures_failed=failed_count,
+            total_duration_ms=total_duration_ms,
+            fixture_results=results,
+            environment={
+                "server_url": self.ws_base_url,
+                "python_version": sys.version,
+                "mode": "fuzz",
+            },
+        )
+
+        return report
+
+    async def run_benchmarks(
+        self,
+        fixture_names: Optional[list[str]] = None,
+        thresholds: Optional[BenchmarkThresholds] = None,
+    ) -> BenchmarkReport:
+        """Run latency benchmarks on fixtures.
+
+        Args:
+            fixture_names: List of fixture names to benchmark (None = all)
+            thresholds: Optional custom latency thresholds
+
+        Returns:
+            Benchmark report with latency measurements
+        """
+        # Load fixtures
+        if fixture_names:
+            fixtures = [self.parser.load_fixture(name) for name in fixture_names]
+        else:
+            fixtures = self.parser.load_all_fixtures()
+
+        if not fixtures:
+            console.print("[yellow]No fixtures found for benchmarking[/yellow]")
+            return BenchmarkReport(
+                timestamp=datetime.now().isoformat(),
+                total_fixtures=0,
+                benchmark_results=[],
+                thresholds=thresholds or BenchmarkThresholds(),
+            )
+
+        console.print(f"\n[bold]Benchmarking {len(fixtures)} fixture(s)...[/bold]\n")
+
+        # Collect traces
+        traces = []
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            for fixture in fixtures:
+                task = progress.add_task(
+                    f"Replaying {fixture.metadata.name}...", total=None
+                )
+
+                try:
+                    replayer = WebSocketReplayer(base_url=self.ws_base_url)
+                    trace = await replayer.replay_fixture(fixture)
+                    traces.append((trace, fixture.metadata.name))
+                except Exception as e:
+                    console.print(f"[red]Error replaying {fixture.metadata.name}: {e}[/red]")
+
+                progress.update(task, completed=True)
+
+        # Run benchmarks
+        runner = BenchmarkRunner(thresholds=thresholds)
+        report = runner.run_benchmarks(traces)
+
+        return report
+
     def run(
         self,
         category: Optional[FixtureEventType] = None,
@@ -367,6 +555,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="OpenAI Realtime API Conformance Harness"
     )
+
+    # Mode selection
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--fuzz",
+        action="store_true",
+        help="Run fuzz campaign to test error handling",
+    )
+    mode_group.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Run latency benchmarks",
+    )
+
+    # Fixture selection
     parser.add_argument(
         "--fixture", "-f", action="append", help="Specific fixture(s) to run"
     )
@@ -374,7 +577,11 @@ if __name__ == "__main__":
         "--category", "-c", type=FixtureEventType, help="Filter by category"
     )
     parser.add_argument("--tag", "-t", action="append", help="Filter by tag(s)")
+
+    # Output
     parser.add_argument("--output", "-o", type=Path, help="Output JSON report file")
+
+    # Server config
     parser.add_argument(
         "--no-server",
         action="store_true",
@@ -383,17 +590,112 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="127.0.0.1", help="Server host")
     parser.add_argument("--port", type=int, default=8000, help="Server port")
 
+    # Fuzz options
+    parser.add_argument(
+        "--fuzz-strategy",
+        action="append",
+        choices=["duplicate_ids", "out_of_order", "invalid_tool_output", "malformed_payload"],
+        help="Specific fuzz strategy to apply (can be used multiple times)",
+    )
+    parser.add_argument(
+        "--no-edge-cases",
+        action="store_true",
+        help="Don't include predefined edge cases in fuzz campaign",
+    )
+
+    # Benchmark options
+    parser.add_argument(
+        "--ttft-threshold",
+        type=int,
+        default=1000,
+        help="TTFT threshold in milliseconds (default: 1000)",
+    )
+    parser.add_argument(
+        "--stt-threshold",
+        type=int,
+        default=300,
+        help="STT flush latency threshold in milliseconds (default: 300)",
+    )
+    parser.add_argument(
+        "--tool-rtt-threshold",
+        type=int,
+        default=2000,
+        help="Tool call RTT threshold in milliseconds (default: 2000)",
+    )
+    parser.add_argument(
+        "--actuator-rtt-threshold",
+        type=int,
+        default=500,
+        help="Actuator RTT threshold in milliseconds (default: 500)",
+    )
+
     args = parser.parse_args()
 
     runner = HarnessRunner(server_host=args.host, server_port=args.port)
 
-    report = runner.run(
-        category=args.category,
-        tags=args.tag,
-        fixture_names=args.fixture,
-        output_file=args.output,
-        start_server=not args.no_server,
-    )
+    try:
+        # Start server if requested
+        if not args.no_server:
+            runner.server.start()
 
-    # Exit with failure code if any fixtures failed
-    sys.exit(0 if report.fixtures_failed == 0 else 1)
+        # Run based on mode
+        if args.fuzz:
+            # Fuzz mode
+            report = asyncio.run(
+                runner.run_fuzz_campaign(
+                    base_fixtures=args.fixture,
+                    strategies=args.fuzz_strategy,
+                    include_edge_cases=not args.no_edge_cases,
+                )
+            )
+            runner._display_report(report)
+
+            if args.output:
+                args.output.write_text(json.dumps(report.model_dump(), indent=2))
+                console.print(f"\n[green]Report written to {args.output}[/green]")
+
+            sys.exit(0 if report.fixtures_failed == 0 else 1)
+
+        elif args.benchmark:
+            # Benchmark mode
+            thresholds = BenchmarkThresholds(
+                ttft_ms=args.ttft_threshold,
+                stt_flush_ms=args.stt_threshold,
+                tool_call_rtt_ms=args.tool_rtt_threshold,
+                actuator_rtt_ms=args.actuator_rtt_threshold,
+            )
+
+            report = asyncio.run(
+                runner.run_benchmarks(
+                    fixture_names=args.fixture,
+                    thresholds=thresholds,
+                )
+            )
+
+            # Display benchmark report
+            benchmark_runner = BenchmarkRunner(thresholds=thresholds)
+            console.print(benchmark_runner.format_report(report))
+
+            if args.output:
+                benchmark_runner.save_json_report(report, str(args.output))
+                console.print(f"\n[green]Report written to {args.output}[/green]")
+
+            # Exit with failure if any measurements failed
+            total_failed = sum(r.failed_measurements for r in report.benchmark_results)
+            sys.exit(0 if total_failed == 0 else 1)
+
+        else:
+            # Normal conformance mode
+            report = runner.run(
+                category=args.category,
+                tags=args.tag,
+                fixture_names=args.fixture,
+                output_file=args.output,
+                start_server=False,  # Already started above if needed
+            )
+            sys.exit(0 if report.fixtures_failed == 0 else 1)
+
+    finally:
+        # Stop server if we started it
+        if not args.no_server:
+            runner.server.stop()

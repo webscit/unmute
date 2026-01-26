@@ -71,17 +71,135 @@ python -m tests.realtime_harness.runner --no-server
 python -m tests.realtime_harness.runner --output reports/conformance_report.json
 ```
 
+## Fuzz Testing
+
+The harness includes fuzzing capabilities to test protocol robustness and error handling.
+
+### Run Fuzz Campaign
+
+```bash
+# Run all fuzz strategies on all fixtures
+python -m tests.realtime_harness.runner --fuzz
+
+# Run specific fuzz strategy
+python -m tests.realtime_harness.runner --fuzz --fuzz-strategy duplicate_ids
+
+# Fuzz specific fixtures
+python -m tests.realtime_harness.runner --fuzz --fixture text_only_basic
+
+# Generate JSON report
+python -m tests.realtime_harness.runner --fuzz --output fuzz_report.json
+```
+
+### Fuzz Strategies
+
+- **duplicate_ids**: Injects duplicate event IDs to test collision handling
+- **out_of_order**: Shuffles event order to test state machine resilience
+- **invalid_tool_output**: Corrupts tool call outputs to test error handling
+- **malformed_payload**: Generates malformed event structures to test parser robustness
+
+### Edge Cases
+
+Predefined edge case fixtures are automatically included:
+- Empty event IDs
+- Missing event type fields
+- Null event types
+- Unknown event types
+
+## Latency Benchmarking
+
+The harness can measure latency for key operations and enforce thresholds.
+
+### Run Benchmarks
+
+```bash
+# Run benchmarks with default thresholds
+python -m tests.realtime_harness.runner --benchmark
+
+# Benchmark specific fixtures
+python -m tests.realtime_harness.runner --benchmark --fixture audio_input_basic
+
+# Custom thresholds
+python -m tests.realtime_harness.runner --benchmark \
+  --ttft-threshold 500 \
+  --stt-threshold 200 \
+  --tool-rtt-threshold 1500
+
+# Generate JSON report
+python -m tests.realtime_harness.runner --benchmark --output benchmark_report.json
+```
+
+### Benchmark Metrics
+
+| Metric | Description | Default Threshold |
+|--------|-------------|-------------------|
+| **TTFT** | Time To First Token (response.created → first content delta) | 1000ms |
+| **STT Flush** | STT flush latency (buffer.committed → transcription.completed) | 300ms |
+| **Tool Call RTT** | Tool call round-trip time (arguments.done → response) | 2000ms |
+| **Actuator RTT** | Actuator command round-trip time | 500ms |
+
+### Benchmark Report Example
+
+```
+LATENCY BENCHMARK REPORT
+Timestamp: 2026-01-26T10:30:00
+Total fixtures: 3
+
+Thresholds:
+  TTFT: 1000ms
+  STT flush: 300ms
+  Tool call RTT: 2000ms
+  Actuator RTT: 500ms
+
+Summary: 8/10 passed
+
+Fixture: text_only_basic
+  Measurements: 2/2 passed
+    ✓ TTFT_text: 342.15ms (threshold: 1000ms)
+
+Fixture: audio_input_basic
+  Measurements: 1/2 passed
+    ✓ STT_flush: 287.43ms (threshold: 300ms)
+    ✗ TTFT: 1234.56ms (threshold: 1000ms)
+  Statistics:
+    TTFT:
+      mean: 1234.56ms
+      min: 1234.56ms
+      max: 1234.56ms
+      median: 1234.56ms
+```
+
 ## CLI Options
 
 ```
 Options:
+  # Mode selection
+  --fuzz                    Run fuzz campaign to test error handling
+  --benchmark               Run latency benchmarks
+
+  # Fixture selection
   -f, --fixture FIXTURE     Run specific fixture(s) (can specify multiple)
   -c, --category CATEGORY   Filter by category (text_only, audio_input, tool_call, etc.)
   -t, --tag TAG            Filter by tag(s) (can specify multiple)
+
+  # Output
   -o, --output FILE        Write JSON report to file
+
+  # Server config
   --no-server              Don't start server (connect to external server)
   --host HOST              Server host (default: 127.0.0.1)
   --port PORT              Server port (default: 8000)
+
+  # Fuzz options
+  --fuzz-strategy STRATEGY Specific fuzz strategy to apply (can specify multiple)
+                          Choices: duplicate_ids, out_of_order, invalid_tool_output, malformed_payload
+  --no-edge-cases          Don't include predefined edge cases in fuzz campaign
+
+  # Benchmark options
+  --ttft-threshold MS      TTFT threshold in milliseconds (default: 1000)
+  --stt-threshold MS       STT flush latency threshold in milliseconds (default: 300)
+  --tool-rtt-threshold MS  Tool call RTT threshold in milliseconds (default: 2000)
+  --actuator-rtt-threshold MS  Actuator RTT threshold in milliseconds (default: 500)
 ```
 
 ## Fixture Categories
@@ -263,6 +381,25 @@ Protocol compliance validation:
 Main harness orchestrator:
 - `ServerLauncher`: Manage FastAPI server lifecycle
 - `HarnessRunner`: Run fixtures and generate reports
+
+### `fuzz_generators.py`
+
+Fuzz testing capabilities:
+- `FuzzStrategy`: Base class for fuzz mutations
+- `DuplicateIDFuzzer`: Inject duplicate event IDs
+- `OutOfOrderFuzzer`: Shuffle event order
+- `InvalidToolOutputFuzzer`: Corrupt tool outputs
+- `MalformedPayloadFuzzer`: Generate malformed payloads
+- `FuzzCampaign`: Orchestrate multiple fuzz strategies
+
+### `benchmarks.py`
+
+Latency benchmarking:
+- `LatencyBenchmarker`: Measure latency between events
+- `BenchmarkRunner`: Run benchmarks and generate reports
+- `BenchmarkThresholds`: Configure latency thresholds
+- `LatencyMeasurement`: Individual latency measurement
+- `BenchmarkReport`: Complete benchmark report
 
 ## CI Integration
 
