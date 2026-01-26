@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 import unmute.openai_realtime_api_events as ora
 from unmute import metrics as mt
+from unmute.audio.realtime_buffer import RealtimeAudioBuffer
 from unmute.audio_input_override import AudioInputOverride
 from unmute.exceptions import make_ora_error
 from unmute.kyutai_constants import (
@@ -90,6 +91,7 @@ class UnmuteHandler(AsyncStreamHandler):
         self.output_queue: asyncio.Queue[HandlerOutput] = asyncio.Queue()
         self.recorder = Recorder(RECORDINGS_DIR) if RECORDINGS_DIR else None
         self.session_state = SessionState()
+        self.audio_buffer = RealtimeAudioBuffer(sample_rate=SAMPLE_RATE)
 
         self.quest_manager = QuestManager()
 
@@ -363,6 +365,9 @@ class UnmuteHandler(AsyncStreamHandler):
         array = frame[1][0]
 
         self.n_samples_received += array.shape[0]
+
+        # Track samples in both session state and audio buffer for latency tracking
+        self.session_state.add_input_samples(array.shape[0])
 
         # If this doesn't update, it means the receive loop isn't running because
         # the process is busy with something else, which is bad.
@@ -803,6 +808,13 @@ class UnmuteHandler(AsyncStreamHandler):
         previous_item_id = self.session_state.get_previous_item_id()
         item_id = self.session_state.commit_input_buffer()
 
+        # Commit audio buffer and capture latency metrics
+        total_samples, latency_metrics = self.audio_buffer.commit(item_id)
+        logger.debug(
+            f"Audio buffer committed: {total_samples} samples, "
+            f"latency={latency_metrics.arrival_to_flush_ms}ms"
+        )
+
         # Update transcript from last user message if available
         last_user_msg = self.chatbot.last_message("user")
         if last_user_msg and item_id in self.session_state.items:
@@ -810,11 +822,17 @@ class UnmuteHandler(AsyncStreamHandler):
             if item.content:
                 item.content[0]["transcript"] = last_user_msg
 
+        # Reset audio buffer for next segment
+        self.audio_buffer.reset()
+
         return item_id, previous_item_id
 
     async def clear_audio_buffer(self) -> None:
         """Clear the input audio buffer without committing."""
         self.session_state.clear_input_buffer()
+        cleared_samples = self.audio_buffer.clear()
+        logger.debug(f"Audio buffer cleared: {cleared_samples} samples discarded")
+        self.audio_buffer.reset()
 
     def _extract_text_content(self, content: list[dict[str, Any]]) -> str:
         """Extract text from content parts."""

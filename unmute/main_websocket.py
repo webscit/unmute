@@ -440,8 +440,8 @@ async def receive_loop(
 
     Can decide to send messages via `emit_queue`.
     """
-    opus_reader = sphn.OpusStreamReader(SAMPLE_RATE)
-    wait_for_first_opus = True
+    # Use the handler's audio buffer for Opus decoding and frame management
+    audio_buffer = handler.audio_buffer
     while True:
         try:
             message_raw = await websocket.receive_text()
@@ -487,21 +487,15 @@ async def receive_loop(
 
         if isinstance(message, ora.InputAudioBufferAppend):
             opus_bytes = base64.b64decode(message.audio)
-            if wait_for_first_opus:
-                # Somehow the UI is sending us potentially old messages from a previous
-                # connection on reconnect, so that we might get some old OGG packets,
-                # waiting for the bit set for first packet to feed to the decoder.
-                if opus_bytes[5] & 2:
-                    wait_for_first_opus = False
-                else:
-                    continue
-            pcm = await asyncio.to_thread(opus_reader.append_bytes, opus_bytes)
+            # Use audio buffer for Opus decoding with first-packet sync and
+            # frame metadata tracking (timestamps, sequences, latency)
+            pcm = await audio_buffer.append_opus_async(opus_bytes)
 
             message_to_record = ora.UnmuteInputAudioBufferAppendAnonymized(
-                number_of_samples=pcm.size,
+                number_of_samples=pcm.size if pcm is not None else 0,
             )
 
-            if pcm.size:
+            if pcm is not None and pcm.size:
                 await handler.receive((SAMPLE_RATE, pcm[np.newaxis, :]))
         elif isinstance(message, ora.SessionUpdate):
             # Handle extension negotiation from session.update payload
