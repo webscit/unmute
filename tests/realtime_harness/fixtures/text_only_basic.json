@@ -1,0 +1,174 @@
+{
+  "metadata": {
+    "name": "text_only_basic",
+    "description": "Basic text-only conversation with session creation and response",
+    "category": "text_only",
+    "tags": ["basic", "text", "session"],
+    "timeout_seconds": 15
+  },
+  "timing_mode": "relative",
+  "client_events": [
+    {
+      "event": {
+        "type": "session.update",
+        "session": {
+          "modalities": ["text"],
+          "instructions": "You are a helpful assistant. Keep responses brief.",
+          "voice": "alloy",
+          "input_audio_format": "pcm16",
+          "output_audio_format": "pcm16",
+          "turn_detection": null
+        }
+      },
+      "delay_ms": 0,
+      "description": "Update session to text-only mode"
+    },
+    {
+      "event": {
+        "type": "conversation.item.create",
+        "item": {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "Hello! What is 2+2?"
+            }
+          ]
+        }
+      },
+      "delay_ms": 100,
+      "description": "Send user message"
+    },
+    {
+      "event": {
+        "type": "response.create",
+        "response": {
+          "modalities": ["text"]
+        }
+      },
+      "delay_ms": 50,
+      "description": "Request text response"
+    }
+  ],
+  "event_assertions": [
+    {
+      "event_type": "session.created",
+      "min_occurrences": 1,
+      "max_occurrences": 1,
+      "timeout_ms": 2000,
+      "description": "Session should be created on connection"
+    },
+    {
+      "event_type": "session.updated",
+      "match_fields": {
+        "session.modalities": ["text"]
+      },
+      "min_occurrences": 1,
+      "max_occurrences": 1,
+      "timeout_ms": 1000,
+      "description": "Session update should be acknowledged"
+    },
+    {
+      "event_type": "conversation.item.created",
+      "min_occurrences": 1,
+      "max_occurrences": 1,
+      "timeout_ms": 1000,
+      "description": "User message should be acknowledged"
+    },
+    {
+      "event_type": "response.created",
+      "min_occurrences": 1,
+      "max_occurrences": 1,
+      "timeout_ms": 2000,
+      "description": "Response creation should be acknowledged"
+    },
+    {
+      "event_type": "response.output_item.added",
+      "min_occurrences": 1,
+      "timeout_ms": 3000,
+      "description": "Response should have output item"
+    },
+    {
+      "event_type": "response.content_part.added",
+      "min_occurrences": 1,
+      "timeout_ms": 3000,
+      "description": "Response should have content part"
+    },
+    {
+      "event_type": "response.text.delta",
+      "min_occurrences": 1,
+      "timeout_ms": 5000,
+      "description": "Response should stream text deltas"
+    },
+    {
+      "event_type": "response.text.done",
+      "min_occurrences": 1,
+      "max_occurrences": 1,
+      "timeout_ms": 5000,
+      "description": "Text streaming should complete"
+    },
+    {
+      "event_type": "response.content_part.done",
+      "min_occurrences": 1,
+      "timeout_ms": 5000,
+      "description": "Content part should complete"
+    },
+    {
+      "event_type": "response.output_item.done",
+      "min_occurrences": 1,
+      "timeout_ms": 5000,
+      "description": "Output item should complete"
+    },
+    {
+      "event_type": "response.done",
+      "match_fields": {
+        "response.status": "completed"
+      },
+      "min_occurrences": 1,
+      "max_occurrences": 1,
+      "timeout_ms": 5000,
+      "description": "Response should complete successfully"
+    }
+  ],
+  "ordering_assertions": [
+    {
+      "before": "session.created",
+      "after": "session.updated",
+      "strict": true,
+      "description": "Session must be created before updates"
+    },
+    {
+      "before": "response.created",
+      "after": "response.text.delta",
+      "strict": true,
+      "description": "Response must be created before content deltas"
+    },
+    {
+      "before": "response.output_item.added",
+      "after": "response.content_part.added",
+      "strict": false,
+      "description": "Output item should be added before content parts"
+    },
+    {
+      "before": "response.text.delta",
+      "after": "response.text.done",
+      "strict": false,
+      "description": "Text deltas must come before text.done"
+    },
+    {
+      "before": "response.content_part.done",
+      "after": "response.done",
+      "strict": false,
+      "description": "Content parts must complete before response.done"
+    }
+  ],
+  "timing_assertions": [
+    {
+      "event_a": "response.created",
+      "event_b": "response.done",
+      "max_latency_ms": 10000,
+      "description": "Response should complete within 10 seconds"
+    }
+  ]
+}

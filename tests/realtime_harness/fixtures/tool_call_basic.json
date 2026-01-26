@@ -1,0 +1,162 @@
+{
+  "metadata": {
+    "name": "tool_call_basic",
+    "description": "Basic tool call with function execution",
+    "category": "tool_call",
+    "tags": ["tools", "function_calling"],
+    "timeout_seconds": 20
+  },
+  "timing_mode": "relative",
+  "client_events": [
+    {
+      "event": {
+        "type": "session.update",
+        "session": {
+          "modalities": ["text"],
+          "instructions": "You are a helpful assistant with access to tools.",
+          "tools": [
+            {
+              "type": "function",
+              "name": "get_weather",
+              "description": "Get the current weather in a location",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "location": {
+                    "type": "string",
+                    "description": "The city and state, e.g. San Francisco, CA"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "enum": ["celsius", "fahrenheit"],
+                    "default": "fahrenheit"
+                  }
+                },
+                "required": ["location"]
+              }
+            }
+          ]
+        }
+      },
+      "delay_ms": 0,
+      "description": "Configure session with tool"
+    },
+    {
+      "event": {
+        "type": "conversation.item.create",
+        "item": {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "What's the weather in San Francisco?"
+            }
+          ]
+        }
+      },
+      "delay_ms": 100,
+      "description": "Ask question that requires tool use"
+    },
+    {
+      "event": {
+        "type": "response.create",
+        "response": {
+          "modalities": ["text"]
+        }
+      },
+      "delay_ms": 50,
+      "description": "Request response"
+    }
+  ],
+  "event_assertions": [
+    {
+      "event_type": "session.created",
+      "min_occurrences": 1,
+      "max_occurrences": 1,
+      "timeout_ms": 2000,
+      "description": "Session created"
+    },
+    {
+      "event_type": "session.updated",
+      "min_occurrences": 1,
+      "timeout_ms": 1000,
+      "description": "Session updated with tools"
+    },
+    {
+      "event_type": "conversation.item.created",
+      "min_occurrences": 1,
+      "timeout_ms": 1000,
+      "description": "User message created"
+    },
+    {
+      "event_type": "response.created",
+      "min_occurrences": 1,
+      "timeout_ms": 2000,
+      "description": "Response created"
+    },
+    {
+      "event_type": "response.output_item.added",
+      "min_occurrences": 1,
+      "timeout_ms": 3000,
+      "description": "Tool call output item added"
+    },
+    {
+      "event_type": "response.function_call_arguments.delta",
+      "min_occurrences": 1,
+      "timeout_ms": 5000,
+      "description": "Function call arguments streamed"
+    },
+    {
+      "event_type": "response.function_call_arguments.done",
+      "match_fields": {
+        "name": "get_weather"
+      },
+      "min_occurrences": 1,
+      "max_occurrences": 1,
+      "timeout_ms": 5000,
+      "description": "Function call completed"
+    },
+    {
+      "event_type": "response.output_item.done",
+      "min_occurrences": 1,
+      "timeout_ms": 5000,
+      "description": "Output item completed"
+    },
+    {
+      "event_type": "response.done",
+      "min_occurrences": 1,
+      "max_occurrences": 1,
+      "timeout_ms": 8000,
+      "description": "Response completed"
+    }
+  ],
+  "ordering_assertions": [
+    {
+      "before": "response.created",
+      "after": "response.function_call_arguments.delta",
+      "strict": true,
+      "description": "Response must be created before function call args"
+    },
+    {
+      "before": "response.function_call_arguments.delta",
+      "after": "response.function_call_arguments.done",
+      "strict": false,
+      "description": "Arguments stream before completion"
+    },
+    {
+      "before": "response.output_item.done",
+      "after": "response.done",
+      "strict": false,
+      "description": "Output items complete before response"
+    }
+  ],
+  "timing_assertions": [
+    {
+      "event_a": "response.created",
+      "event_b": "response.function_call_arguments.done",
+      "max_latency_ms": 8000,
+      "description": "Function call should complete within 8 seconds"
+    }
+  ]
+}

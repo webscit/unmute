@@ -1,0 +1,138 @@
+{
+  "metadata": {
+    "name": "audio_input_basic",
+    "description": "Audio input with commit and transcription",
+    "category": "audio_input",
+    "tags": ["audio", "transcription", "stt"],
+    "timeout_seconds": 20
+  },
+  "timing_mode": "relative",
+  "client_events": [
+    {
+      "event": {
+        "type": "session.update",
+        "session": {
+          "modalities": ["text", "audio"],
+          "instructions": "You are a helpful assistant.",
+          "voice": "alloy",
+          "input_audio_format": "pcm16",
+          "output_audio_format": "pcm16",
+          "input_audio_transcription": {
+            "model": "whisper-1"
+          },
+          "turn_detection": null
+        }
+      },
+      "delay_ms": 0,
+      "description": "Configure session for audio input"
+    },
+    {
+      "event": {
+        "type": "input_audio_buffer.append",
+        "audio": "AUDIO_PLACEHOLDER_BASE64_1"
+      },
+      "delay_ms": 100,
+      "description": "Append first audio chunk (placeholder)"
+    },
+    {
+      "event": {
+        "type": "input_audio_buffer.append",
+        "audio": "AUDIO_PLACEHOLDER_BASE64_2"
+      },
+      "delay_ms": 50,
+      "description": "Append second audio chunk (placeholder)"
+    },
+    {
+      "event": {
+        "type": "input_audio_buffer.commit"
+      },
+      "delay_ms": 100,
+      "description": "Commit audio buffer for transcription"
+    },
+    {
+      "event": {
+        "type": "response.create",
+        "response": {
+          "modalities": ["text"]
+        }
+      },
+      "delay_ms": 500,
+      "description": "Request text response after transcription"
+    }
+  ],
+  "event_assertions": [
+    {
+      "event_type": "session.created",
+      "min_occurrences": 1,
+      "max_occurrences": 1,
+      "timeout_ms": 2000,
+      "description": "Session created"
+    },
+    {
+      "event_type": "session.updated",
+      "match_fields": {
+        "session.modalities": ["text", "audio"]
+      },
+      "min_occurrences": 1,
+      "timeout_ms": 1000,
+      "description": "Session updated with audio modality"
+    },
+    {
+      "event_type": "input_audio_buffer.committed",
+      "min_occurrences": 1,
+      "max_occurrences": 1,
+      "timeout_ms": 2000,
+      "description": "Audio buffer commit acknowledged"
+    },
+    {
+      "event_type": "conversation.item.created",
+      "match_fields": {
+        "item.type": "message",
+        "item.role": "user"
+      },
+      "min_occurrences": 1,
+      "timeout_ms": 3000,
+      "description": "User message item created from audio"
+    },
+    {
+      "event_type": "conversation.item.input_audio_transcription.completed",
+      "min_occurrences": 0,
+      "timeout_ms": 5000,
+      "description": "Transcription may complete (if STT enabled)"
+    },
+    {
+      "event_type": "response.created",
+      "min_occurrences": 1,
+      "timeout_ms": 2000,
+      "description": "Response created"
+    },
+    {
+      "event_type": "response.done",
+      "min_occurrences": 1,
+      "timeout_ms": 10000,
+      "description": "Response completed"
+    }
+  ],
+  "ordering_assertions": [
+    {
+      "before": "input_audio_buffer.committed",
+      "after": "conversation.item.created",
+      "strict": false,
+      "description": "Buffer commit should trigger item creation"
+    },
+    {
+      "before": "conversation.item.created",
+      "after": "response.created",
+      "strict": false,
+      "description": "Conversation item should exist before response"
+    }
+  ],
+  "timing_assertions": [
+    {
+      "event_a": "input_audio_buffer.committed",
+      "event_b": "conversation.item.created",
+      "max_latency_ms": 5000,
+      "description": "Item creation should follow commit quickly"
+    }
+  ]
+}
