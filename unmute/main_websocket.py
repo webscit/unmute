@@ -489,11 +489,25 @@ async def receive_loop(
             opus_bytes = base64.b64decode(message.audio)
             # Use audio buffer for Opus decoding with first-packet sync and
             # frame metadata tracking (timestamps, sequences, latency)
+
+            # Check for overflow before appending
+            buffer_was_full = audio_buffer.total_samples >= audio_buffer._max_buffer_samples
+
             pcm = await audio_buffer.append_opus_async(opus_bytes)
 
             message_to_record = ora.UnmuteInputAudioBufferAppendAnonymized(
                 number_of_samples=pcm.size if pcm is not None else 0,
             )
+
+            # If buffer overflow detected, emit error event
+            if buffer_was_full and pcm is None:
+                error = make_ora_error(
+                    type="buffer_overflow",
+                    message=f"Audio buffer overflow: {audio_buffer.total_samples} samples exceeds maximum {audio_buffer._max_buffer_samples}. Frame discarded.",
+                )
+                await emit_queue.put(error)
+                mt.BUFFER_OVERFLOW_ERRORS.inc()
+                logger.warning("Buffer overflow detected, frame discarded")
 
             if pcm is not None and pcm.size:
                 await handler.receive((SAMPLE_RATE, pcm[np.newaxis, :]))
@@ -651,6 +665,10 @@ async def emit_loop(
         ):
             logger.info("emit_loop() stopped because WebSocket disconnected")
             raise WebSocketClosedError()
+
+        # Monitor emit_queue size for backpressure
+        emit_queue_size = emit_queue.qsize()
+        mt.EMIT_QUEUE_SIZE.set(emit_queue_size)
 
         try:
             to_emit = emit_queue.get_nowait()

@@ -170,8 +170,14 @@ class SessionState:
         self.input_buffer_committed = False
 
     def commit_input_buffer(self) -> str:
-        """Commit input buffer and return the created item ID."""
-        item_id = ora.random_id("item")
+        """Commit input buffer and return the created item ID.
+
+        If a pending item ID was pre-allocated (e.g., for speech_started event),
+        use that ID. Otherwise create a new one.
+        """
+        # Use pre-allocated item ID if available, otherwise create new
+        item_id = self.pending_audio_item_id or ora.random_id("item")
+
         item = ora.Item(
             id=item_id,
             type="message",
@@ -198,6 +204,16 @@ class SessionState:
         if not self.item_order:
             return None
         return self.item_order[-1]
+
+    def get_pending_input_item_id(self) -> str:
+        """Get or create a pending item ID for the current input audio buffer.
+
+        This is used to pre-allocate an item ID when speech starts,
+        before the buffer is actually committed.
+        """
+        if self.pending_audio_item_id is None:
+            self.pending_audio_item_id = ora.random_id("item")
+        return self.pending_audio_item_id
 
     def snapshot(self) -> dict[str, Any]:
         """Create a serializable snapshot of session state for recording/replay."""

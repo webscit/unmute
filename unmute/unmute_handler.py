@@ -66,6 +66,11 @@ FURTHER_MESSAGES_TEMPERATURE = 0.3
 # A word from the ASR can still interrupt the bot.
 UNINTERRUPTIBLE_BY_VAD_TIME_SEC = 3
 
+# Backpressure thresholds - queue sizes that trigger warnings/errors
+OUTPUT_QUEUE_WARNING_THRESHOLD = 50
+OUTPUT_QUEUE_ERROR_THRESHOLD = 100
+BACKPRESSURE_CHECK_INTERVAL = 5.0  # seconds between checks
+
 logger = getLogger(__name__)
 
 HandlerOutput = (
@@ -106,6 +111,15 @@ class UnmuteHandler(AsyncStreamHandler):
         self.openai_client = get_openai_client()
 
         self.turn_transition_lock = asyncio.Lock()
+
+        # VAD event tracking
+        self.speech_started: bool = False
+        self.speech_start_time: float | None = None
+        self.current_speech_item_id: str | None = None
+
+        # Backpressure monitoring
+        self.last_backpressure_check: float = 0
+        self.backpressure_error_emitted: bool = False
 
         self.debug_dict: dict[str, Any] = {
             "timing": {},
@@ -417,10 +431,38 @@ class UnmuteHandler(AsyncStreamHandler):
         await stt.send_audio(array)
         if self.stt_end_of_flush_time is None:
             await self.detect_long_silence()
+            await self.check_backpressure()
 
             if self.determine_pause():
                 logger.info("Pause detected")
-                await self.output_queue.put(ora.InputAudioBufferSpeechStopped())
+
+                # Calculate audio_end_ms relative to session start
+                audio_end_ms = int(self.audio_received_sec() * 1000)
+
+                # Use current speech item_id if available
+                item_id = self.current_speech_item_id
+
+                # Emit speech_stopped with metadata
+                await self.output_queue.put(
+                    ora.InputAudioBufferSpeechStopped(
+                        item_id=item_id,
+                        audio_end_ms=audio_end_ms,
+                    )
+                )
+                mt.VAD_SPEECH_STOPPED.inc()
+
+                # Track latency from speech start to stop
+                if self.speech_start_time is not None:
+                    speech_duration = self.audio_received_sec() - self.speech_start_time
+                    mt.VAD_SPEECH_DURATION.observe(speech_duration)
+                    logger.info(
+                        f"Speech stopped: item_id={item_id}, audio_end_ms={audio_end_ms}, "
+                        f"duration={speech_duration:.2f}s"
+                    )
+
+                # Reset speech tracking
+                self.speech_started = False
+                self.speech_start_time = None
 
                 self.stt_end_of_flush_time = stt.current_time + stt.delay_sec
                 self.stt_flush_timer = Stopwatch()
@@ -544,7 +586,30 @@ class UnmuteHandler(AsyncStreamHandler):
                     # Ensure we don't stop after the first word if the VAD didn't have
                     # time to react.
                     stt.pause_prediction.value = 0.0
-                    await self.output_queue.put(ora.InputAudioBufferSpeechStarted())
+
+                    # Mark speech as started and track timing
+                    if not self.speech_started:
+                        self.speech_started = True
+                        self.speech_start_time = self.audio_received_sec()
+
+                        # Calculate audio_start_ms relative to session start
+                        audio_start_ms = int(self.speech_start_time * 1000)
+
+                        # Get or create pending item_id
+                        item_id = self.session_state.get_pending_input_item_id()
+                        self.current_speech_item_id = item_id
+
+                        # Emit speech_started with metadata
+                        await self.output_queue.put(
+                            ora.InputAudioBufferSpeechStarted(
+                                item_id=item_id,
+                                audio_start_ms=audio_start_ms,
+                            )
+                        )
+                        mt.VAD_SPEECH_STARTED.inc()
+                        logger.info(
+                            f"Speech started: item_id={item_id}, audio_start_ms={audio_start_ms}"
+                        )
         except websockets.ConnectionClosed:
             logger.info("STT connection closed while receiving messages.")
 
@@ -684,6 +749,11 @@ class UnmuteHandler(AsyncStreamHandler):
 
         await self.output_queue.put(ora.UnmuteInterruptedByVAD())
 
+        # Reset speech tracking state after interruption
+        self.speech_started = False
+        self.speech_start_time = None
+        # Note: Keep current_speech_item_id for the interrupted segment
+
         await self.quest_manager.remove("tts")
         await self.quest_manager.remove("llm")
 
@@ -715,8 +785,52 @@ class UnmuteHandler(AsyncStreamHandler):
             # state to "user_speaking".
             # The system prompt has a rule that tells it how to handle the "..."
             # messages.
-            logger.info("Long silence detected.")
+            silence_duration = self.audio_received_sec() - self.waiting_for_user_start_time
+            logger.info(f"Long silence detected: {silence_duration:.1f}s")
+
+            # Emit compliant error event for silence timeout
+            error = make_ora_error(
+                type="silence_timeout",
+                message=f"No user input detected for {silence_duration:.1f}s (timeout: {USER_SILENCE_TIMEOUT}s)",
+            )
+            await self.output_queue.put(error)
+            mt.SILENCE_TIMEOUT_ERRORS.inc()
+
             await self.add_chat_message_delta(USER_SILENCE_MARKER, "user")
+
+    async def check_backpressure(self):
+        """Monitor output queue size and emit errors if backpressure threshold exceeded."""
+        current_time = self.audio_received_sec()
+
+        # Only check periodically to avoid overhead
+        if current_time - self.last_backpressure_check < BACKPRESSURE_CHECK_INTERVAL:
+            return
+
+        self.last_backpressure_check = current_time
+        queue_size = self.output_queue.qsize()
+
+        # Update metrics
+        mt.OUTPUT_QUEUE_SIZE.set(queue_size)
+
+        if queue_size >= OUTPUT_QUEUE_ERROR_THRESHOLD:
+            if not self.backpressure_error_emitted:
+                logger.error(
+                    f"Backpressure error: output queue size {queue_size} exceeds threshold {OUTPUT_QUEUE_ERROR_THRESHOLD}"
+                )
+                error = make_ora_error(
+                    type="backpressure_error",
+                    message=f"Output queue backpressure: {queue_size} items queued (threshold: {OUTPUT_QUEUE_ERROR_THRESHOLD})",
+                )
+                await self.output_queue.put(error)
+                mt.BACKPRESSURE_ERRORS.inc()
+                self.backpressure_error_emitted = True
+        elif queue_size >= OUTPUT_QUEUE_WARNING_THRESHOLD:
+            logger.warning(
+                f"Backpressure warning: output queue size {queue_size} exceeds warning threshold {OUTPUT_QUEUE_WARNING_THRESHOLD}"
+            )
+        else:
+            # Reset error flag when queue drains below threshold
+            self.backpressure_error_emitted = False
 
     # === Client Event Handlers ===
 
