@@ -1,5 +1,6 @@
 import asyncio
 import math
+import time
 from functools import partial
 from logging import getLogger
 from pathlib import Path
@@ -42,6 +43,13 @@ from unmute.session_state import SessionState
 from unmute.stt.speech_to_text import SpeechToText, STTMarkerMessage
 from unmute.timer import Stopwatch
 from unmute.tooling.tool_schemas import get_tool_schemas, validate_and_parse_tool_call
+from unmute.tracing import (
+    LLM_WORD_GENERATION_DURATION,
+    STT_FLUSH_DURATION,
+    TTS_WORD_PROCESSING_DURATION,
+    trace_queue_operation,
+    trace_span,
+)
 from unmute.tts.text_to_speech import (
     TextToSpeech,
     TTSAudioMessage,
@@ -273,33 +281,44 @@ class UnmuteHandler(AsyncStreamHandler):
         mt.VLLM_ACTIVE_SESSIONS.inc()
 
         final_status = "completed"
+        last_word_time = None
         try:
             async for delta in rechunk_to_words(llm.chat_completion(messages)):
-                await self.output_queue.put(
-                    ora.UnmuteResponseTextDeltaReady(delta=delta)
-                )
+                async with trace_span("llm_word_stream"):
+                    # Track inter-word latency
+                    if last_word_time is not None:
+                        word_latency_ms = (time.monotonic() - last_word_time) * 1000
+                        LLM_WORD_GENERATION_DURATION.observe(word_latency_ms)
+                    last_word_time = time.monotonic()
 
-                mt.VLLM_RECV_WORDS.inc()
-                response_words.append(delta)
+                    await self.output_queue.put(
+                        ora.UnmuteResponseTextDeltaReady(delta=delta)
+                    )
 
-                if time_to_first_token is None:
-                    time_to_first_token = llm_stopwatch.time()
-                    self.debug_dict["timing"]["to_first_token"] = time_to_first_token
-                    mt.VLLM_TTFT.observe(time_to_first_token)
-                    logger.info("Sending first word to TTS: %s", delta)
+                    mt.VLLM_RECV_WORDS.inc()
+                    response_words.append(delta)
 
-                self.tts_output_stopwatch.start_if_not_started()
-                try:
-                    tts = await quest.get()
-                except Exception:
-                    error_from_tts = True
-                    raise
+                    if time_to_first_token is None:
+                        time_to_first_token = llm_stopwatch.time()
+                        self.debug_dict["timing"]["to_first_token"] = time_to_first_token
+                        mt.VLLM_TTFT.observe(time_to_first_token)
+                        logger.info("Sending first word to TTS: %s", delta)
 
-                if len(self.chatbot.chat_history) > generating_message_i:
-                    break  # We've been interrupted
+                    self.tts_output_stopwatch.start_if_not_started()
+                    try:
+                        tts = await quest.get()
+                    except Exception:
+                        error_from_tts = True
+                        raise
 
-                assert isinstance(delta, str)  # make Pyright happy
-                await tts.send(delta)
+                    if len(self.chatbot.chat_history) > generating_message_i:
+                        break  # We've been interrupted
+
+                    assert isinstance(delta, str)  # make Pyright happy
+                    async with trace_span(
+                        "tts_word_send", histogram=TTS_WORD_PROCESSING_DURATION
+                    ):
+                        await tts.send(delta)
 
             # Emit ResponseTextDone with IDs
             full_text = "".join(response_words)
@@ -435,44 +454,49 @@ class UnmuteHandler(AsyncStreamHandler):
             await self.check_backpressure()
 
             if self.determine_pause():
-                logger.info("Pause detected")
+                async with trace_span(
+                    "stt_flush_pipeline",
+                    histogram=STT_FLUSH_DURATION,
+                    attributes={"pause_score": stt.pause_prediction.value},
+                ):
+                    logger.info("Pause detected")
 
-                # Calculate audio_end_ms relative to session start
-                audio_end_ms = int(self.audio_received_sec() * 1000)
+                    # Calculate audio_end_ms relative to session start
+                    audio_end_ms = int(self.audio_received_sec() * 1000)
 
-                # Use current speech item_id if available
-                item_id = self.current_speech_item_id
+                    # Use current speech item_id if available
+                    item_id = self.current_speech_item_id
 
-                # Emit speech_stopped with metadata
-                await self.output_queue.put(
-                    ora.InputAudioBufferSpeechStopped(
-                        item_id=item_id,
-                        audio_end_ms=audio_end_ms,
+                    # Emit speech_stopped with metadata
+                    await self.output_queue.put(
+                        ora.InputAudioBufferSpeechStopped(
+                            item_id=item_id,
+                            audio_end_ms=audio_end_ms,
+                        )
                     )
-                )
-                mt.VAD_SPEECH_STOPPED.inc()
+                    mt.VAD_SPEECH_STOPPED.inc()
 
-                # Track latency from speech start to stop
-                if self.speech_start_time is not None:
-                    speech_duration = self.audio_received_sec() - self.speech_start_time
-                    mt.VAD_SPEECH_DURATION.observe(speech_duration)
-                    logger.info(
-                        f"Speech stopped: item_id={item_id}, audio_end_ms={audio_end_ms}, "
-                        f"duration={speech_duration:.2f}s"
-                    )
+                    # Track latency from speech start to stop
+                    if self.speech_start_time is not None:
+                        speech_duration = self.audio_received_sec() - self.speech_start_time
+                        mt.VAD_SPEECH_DURATION.observe(speech_duration)
+                        logger.info(
+                            f"Speech stopped: item_id={item_id}, audio_end_ms={audio_end_ms}, "
+                            f"duration={speech_duration:.2f}s"
+                        )
 
-                # Reset speech tracking
-                self.speech_started = False
-                self.speech_start_time = None
+                    # Reset speech tracking
+                    self.speech_started = False
+                    self.speech_start_time = None
 
-                self.stt_end_of_flush_time = stt.current_time + stt.delay_sec
-                self.stt_flush_timer = Stopwatch()
-                num_frames = (
-                    int(math.ceil(stt.delay_sec / FRAME_TIME_SEC)) + 1
-                )  # some safety margin.
-                zero = np.zeros(SAMPLES_PER_FRAME, dtype=np.float32)
-                for _ in range(num_frames):
-                    await stt.send_audio(zero)
+                    self.stt_end_of_flush_time = stt.current_time + stt.delay_sec
+                    self.stt_flush_timer = Stopwatch()
+                    num_frames = (
+                        int(math.ceil(stt.delay_sec / FRAME_TIME_SEC)) + 1
+                    )  # some safety margin.
+                    zero = np.zeros(SAMPLES_PER_FRAME, dtype=np.float32)
+                    for _ in range(num_frames):
+                        await stt.send_audio(zero)
             elif (
                 self.chatbot.conversation_state() == "bot_speaking"
                 and stt.pause_prediction.value < 0.4
@@ -558,18 +582,27 @@ class UnmuteHandler(AsyncStreamHandler):
         await quest.get()
 
     async def _stt_loop(self, stt: SpeechToText):
+        last_word_time = None
         try:
             async for data in stt:
                 if isinstance(data, STTMarkerMessage):
                     # Ignore the marker messages
                     continue
 
-                await self.output_queue.put(
-                    ora.ConversationItemInputAudioTranscriptionDelta(
-                        delta=data.text,
-                        start_time=data.start_time,
+                # Track inter-word latency for STT
+                if last_word_time is not None and data.text:
+                    word_latency_ms = (data.start_time - last_word_time) * 1000
+                    LLM_WORD_GENERATION_DURATION.observe(word_latency_ms)
+                if data.text:
+                    last_word_time = data.start_time
+
+                async with trace_queue_operation("output_queue", "put"):
+                    await self.output_queue.put(
+                        ora.ConversationItemInputAudioTranscriptionDelta(
+                            delta=data.text,
+                            start_time=data.start_time,
+                        )
                     )
-                )
 
                 # The STT sends an empty string as the first message, but we
                 # don't want to add that because it can trigger a pause even

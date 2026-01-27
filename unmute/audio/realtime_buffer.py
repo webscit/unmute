@@ -40,6 +40,7 @@ import numpy as np
 import sphn
 
 from unmute.kyutai_constants import SAMPLE_RATE
+from unmute.tracing import AUDIO_INGESTION_DURATION, trace_span
 
 if TYPE_CHECKING:
     from unmute.stt.speech_to_text import SpeechToText
@@ -348,8 +349,13 @@ class RealtimeAudioBuffer:
 
         Runs Opus decoding in a thread pool for better async performance.
         """
-        # Run decode in thread to avoid blocking event loop
-        pcm = await asyncio.to_thread(self._opus_reader.append_bytes, opus_bytes)
+        # Run decode in thread to avoid blocking event loop with instrumentation
+        async with trace_span(
+            "opus_decode",
+            histogram=AUDIO_INGESTION_DURATION,
+            attributes={"opus_bytes": len(opus_bytes)},
+        ):
+            pcm = await asyncio.to_thread(self._opus_reader.append_bytes, opus_bytes)
 
         if self._state != BufferState.ACCUMULATING:
             logger.warning(

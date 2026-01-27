@@ -48,6 +48,13 @@ from unmute.kyutai_constants import (
 )
 from unmute.service_discovery import async_ttl_cached
 from unmute.timer import Stopwatch
+from unmute.tracing import (
+    WEBSOCKET_SEND_DURATION,
+    end_trace,
+    start_trace,
+    trace_queue_operation,
+    trace_span,
+)
 from unmute.tts.voice_cloning import clone_voice
 from unmute.tts.voice_donation import (
     VoiceDonationSubmission,
@@ -332,6 +339,10 @@ async def websocket_route(websocket: WebSocket):
             # Initialize session configuration for extension negotiation
             negotiated_session = NegotiatedSession()
 
+            # Start distributed tracing for this session
+            session_id = ora.random_id("sess")
+            start_trace(session_id)
+
             handler = UnmuteHandler()
             # Store negotiated session on handler for access during message handling
             handler.negotiated_session = negotiated_session  # type: ignore[attr-defined]
@@ -351,6 +362,13 @@ async def websocket_route(websocket: WebSocket):
 
             mt.ACTIVE_SESSIONS.dec()
             mt.SESSION_DURATION.observe(session_watch.time())
+
+            # End tracing and log summary
+            trace_ctx = end_trace()
+            if trace_ctx:
+                from unmute.tracing import format_trace_summary
+
+                logger.info("Session trace summary:\n%s", format_trace_summary(trace_ctx))
 
 
 async def _report_websocket_exception(websocket: WebSocket, exc: Exception):
@@ -790,9 +808,13 @@ async def emit_loop(
         mt.EMIT_QUEUE_SIZE.set(emit_queue_size)
 
         try:
-            to_emit = emit_queue.get_nowait()
+            # Try to get from buffered queue first (non-blocking)
+            async with trace_queue_operation("emit_queue", "get_nowait"):
+                to_emit = emit_queue.get_nowait()
         except asyncio.QueueEmpty:
-            emitted_by_handler = await handler.emit()
+            # Fall back to handler emit (blocking)
+            async with trace_queue_operation("handler", "emit"):
+                emitted_by_handler = await handler.emit()
 
             if emitted_by_handler is None:
                 continue
@@ -825,7 +847,13 @@ async def emit_loop(
             await handler.recorder.add_event("server", to_emit)
 
         try:
-            await websocket.send_text(to_emit.model_dump_json())
+            # Trace websocket send operations to detect network/serialization bottlenecks
+            async with trace_span(
+                "websocket_send",
+                histogram=WEBSOCKET_SEND_DURATION,
+                attributes={"event_type": to_emit.type},
+            ):
+                await websocket.send_text(to_emit.model_dump_json())
         except (WebSocketDisconnect, RuntimeError) as e:
             if isinstance(e, RuntimeError):
                 if "Unexpected ASGI message 'websocket.send'" in str(e):
