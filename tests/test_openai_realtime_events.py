@@ -28,7 +28,9 @@ class TestClientEvents:
         }
         event = ora.SessionUpdate.model_validate(payload)
         assert event.type == "session.update"
-        assert event.session["voice"] == "alloy"
+        # session can be dict or Session object after validation
+        session_voice = event.session.voice if hasattr(event.session, 'voice') else event.session["voice"]
+        assert session_voice == "alloy"
 
         # Test round-trip
         dumped = json.loads(event.model_dump_json())
