@@ -456,9 +456,9 @@ class TestServerEvents:
         assert event.part["text"] == "Hello!"
 
     def test_response_text_delta(self):
-        """Test response.text.delta event."""
+        """Test response.output_text.delta event."""
         payload = {
-            "type": "response.text.delta",
+            "type": "response.output_text.delta",
             "delta": "Hello",
             "response_id": "resp_001",
             "item_id": "item_001",
@@ -466,21 +466,21 @@ class TestServerEvents:
             "content_index": 0,
         }
         event = ora.ResponseTextDelta.model_validate(payload)
-        assert event.type == "response.text.delta"
+        assert event.type == "response.output_text.delta"
         assert event.delta == "Hello"
 
         # Test backward compatibility (without optional fields)
         payload_minimal = {
-            "type": "response.text.delta",
+            "type": "response.output_text.delta",
             "delta": "World",
         }
         event2 = ora.ResponseTextDelta.model_validate(payload_minimal)
         assert event2.delta == "World"
 
     def test_response_text_done(self):
-        """Test response.text.done event."""
+        """Test response.output_text.done event."""
         payload = {
-            "type": "response.text.done",
+            "type": "response.output_text.done",
             "text": "Hello, how can I help you?",
             "response_id": "resp_001",
             "item_id": "item_001",
@@ -488,13 +488,13 @@ class TestServerEvents:
             "content_index": 0,
         }
         event = ora.ResponseTextDone.model_validate(payload)
-        assert event.type == "response.text.done"
+        assert event.type == "response.output_text.done"
         assert event.text == "Hello, how can I help you?"
 
     def test_response_audio_transcript_delta(self):
-        """Test response.audio_transcript.delta event."""
+        """Test response.output_audio_transcript.delta event."""
         payload = {
-            "type": "response.audio_transcript.delta",
+            "type": "response.output_audio_transcript.delta",
             "delta": "Hello",
             "response_id": "resp_001",
             "item_id": "item_001",
@@ -502,13 +502,13 @@ class TestServerEvents:
             "content_index": 0,
         }
         event = ora.ResponseAudioTranscriptDelta.model_validate(payload)
-        assert event.type == "response.audio_transcript.delta"
+        assert event.type == "response.output_audio_transcript.delta"
         assert event.delta == "Hello"
 
     def test_response_audio_transcript_done(self):
-        """Test response.audio_transcript.done event."""
+        """Test response.output_audio_transcript.done event."""
         payload = {
-            "type": "response.audio_transcript.done",
+            "type": "response.output_audio_transcript.done",
             "transcript": "Hello, how are you today?",
             "response_id": "resp_001",
             "item_id": "item_001",
@@ -516,13 +516,13 @@ class TestServerEvents:
             "content_index": 0,
         }
         event = ora.ResponseAudioTranscriptDone.model_validate(payload)
-        assert event.type == "response.audio_transcript.done"
+        assert event.type == "response.output_audio_transcript.done"
         assert event.transcript == "Hello, how are you today?"
 
     def test_response_audio_delta(self):
-        """Test response.audio.delta event."""
+        """Test response.output_audio.delta event."""
         payload = {
-            "type": "response.audio.delta",
+            "type": "response.output_audio.delta",
             "delta": "SGVsbG8gd29ybGQ=",
             "response_id": "resp_001",
             "item_id": "item_001",
@@ -530,25 +530,25 @@ class TestServerEvents:
             "content_index": 0,
         }
         event = ora.ResponseAudioDelta.model_validate(payload)
-        assert event.type == "response.audio.delta"
+        assert event.type == "response.output_audio.delta"
         assert event.delta == "SGVsbG8gd29ybGQ="
 
     def test_response_audio_done(self):
-        """Test response.audio.done event."""
+        """Test response.output_audio.done event."""
         payload = {
-            "type": "response.audio.done",
+            "type": "response.output_audio.done",
             "response_id": "resp_001",
             "item_id": "item_001",
             "output_index": 0,
             "content_index": 0,
         }
         event = ora.ResponseAudioDone.model_validate(payload)
-        assert event.type == "response.audio.done"
+        assert event.type == "response.output_audio.done"
 
         # Test backward compatibility
-        payload_minimal = {"type": "response.audio.done"}
+        payload_minimal = {"type": "response.output_audio.done"}
         event2 = ora.ResponseAudioDone.model_validate(payload_minimal)
-        assert event2.type == "response.audio.done"
+        assert event2.type == "response.output_audio.done"
 
     def test_response_function_call_arguments_delta(self):
         """Test response.function_call_arguments.delta event."""
@@ -789,17 +789,17 @@ class TestRoundTrip:
             (ora.InputAudioBufferCleared, {"type": "input_audio_buffer.cleared"}),
             (
                 ora.ResponseTextDelta,
-                {"type": "response.text.delta", "delta": "Hello"},
+                {"type": "response.output_text.delta", "delta": "Hello"},
             ),
             (
                 ora.ResponseTextDone,
-                {"type": "response.text.done", "text": "Hello!"},
+                {"type": "response.output_text.done", "text": "Hello!"},
             ),
             (
                 ora.ResponseAudioDelta,
-                {"type": "response.audio.delta", "delta": "SGVsbG8="},
+                {"type": "response.output_audio.delta", "delta": "SGVsbG8="},
             ),
-            (ora.ResponseAudioDone, {"type": "response.audio.done"}),
+            (ora.ResponseAudioDone, {"type": "response.output_audio.done"}),
         ],
     )
     def test_round_trip(self, event_class, payload):

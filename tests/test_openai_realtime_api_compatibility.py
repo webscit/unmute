@@ -256,7 +256,7 @@ class TestServerEventCompatibility:
         assert payload["error"]["message"] == "Invalid audio format specified"
 
     def test_response_audio_delta_structure(self):
-        """Verify response.audio.delta matches OpenAI structure."""
+        """Verify response.output_audio.delta matches OpenAI structure."""
         our_event = ora.ResponseAudioDelta(
             delta="SGVsbG8gd29ybGQ=",
             response_id="resp_001",
@@ -267,7 +267,7 @@ class TestServerEventCompatibility:
 
         payload = json.loads(our_event.model_dump_json())
 
-        assert payload["type"] == "response.audio.delta"
+        assert payload["type"] == "response.output_audio.delta"
         assert payload["delta"] == "SGVsbG8gd29ybGQ="
         assert payload["response_id"] == "resp_001"
 
@@ -537,7 +537,7 @@ class TestEventDiscrimination:
         test_cases = [
             ('{"type": "session.created", "session": {"id": "sess_1", "object": "realtime.session"}}', ora.SessionCreated),
             ('{"type": "error", "error": {"type": "invalid_request_error", "message": "test"}}', ora.Error),
-            ('{"type": "response.audio.delta", "delta": "SGVsbG8="}', ora.ResponseAudioDelta),
+            ('{"type": "response.output_audio.delta", "delta": "SGVsbG8="}', ora.ResponseAudioDelta),
             ('{"type": "rate_limits.updated", "rate_limits": []}', ora.RateLimitsUpdated),
         ]
 
@@ -768,13 +768,11 @@ class TestOfficialOpenAITypeValidation:
         openai_event = RealtimeErrorEvent.model_validate(payload)
         assert openai_event.type == "error"
 
-    @pytest.mark.xfail(reason="Event type renamed: 'response.text.delta' -> 'response.output_text.delta'")
     def test_validate_response_text_delta_against_openai(self):
         """Validate our ResponseTextDelta against OpenAI types.
 
-        UPGRADE REQUIRED: OpenAI has renamed this event type:
-        - Old (ours): response.text.delta
-        - New (OpenAI): response.output_text.delta
+        Our event type now matches OpenAI's naming convention:
+        response.output_text.delta
         """
         our_event = ora.ResponseTextDelta(
             delta="Hello",
@@ -789,13 +787,11 @@ class TestOfficialOpenAITypeValidation:
         assert openai_event.type == "response.output_text.delta"
         assert openai_event.delta == "Hello"
 
-    @pytest.mark.xfail(reason="Event type renamed: 'response.audio.delta' -> 'response.output_audio.delta'")
     def test_validate_response_audio_delta_against_openai(self):
         """Validate our ResponseAudioDelta against OpenAI types.
 
-        UPGRADE REQUIRED: OpenAI has renamed this event type:
-        - Old (ours): response.audio.delta
-        - New (OpenAI): response.output_audio.delta
+        Our event type now matches OpenAI's naming convention:
+        response.output_audio.delta
         """
         our_event = ora.ResponseAudioDelta(
             delta="SGVsbG8=",
@@ -853,39 +849,39 @@ class TestCriticalAPIChanges:
 
     def test_response_text_delta_type_change(self):
         """Document the response.text.delta -> response.output_text.delta change."""
-        our_type = "response.text.delta"
+        old_type = "response.text.delta"
         openai_type = "response.output_text.delta"
 
-        assert our_type != openai_type
-
-        # Our event uses the old type
+        # Our event now uses the new OpenAI type
         our_event = ora.ResponseTextDelta(delta="Hello")
-        assert our_event.type == our_type
+        assert our_event.type == openai_type
 
     def test_response_audio_delta_type_change(self):
         """Document the response.audio.delta -> response.output_audio.delta change."""
-        our_type = "response.audio.delta"
+        old_type = "response.audio.delta"
         openai_type = "response.output_audio.delta"
 
-        assert our_type != openai_type
-
-        # Our event uses the old type
+        # Our event now uses the new OpenAI type
         our_event = ora.ResponseAudioDelta(delta="SGVsbG8=")
-        assert our_event.type == our_type
+        assert our_event.type == openai_type
 
     def test_response_text_done_type_change(self):
         """Document the response.text.done -> response.output_text.done change."""
-        our_type = "response.text.done"
-        openai_type = "response.output_text.done"  # OpenAI likely uses this
+        old_type = "response.text.done"
+        openai_type = "response.output_text.done"
 
-        assert our_type != openai_type
+        # Our event now uses the new OpenAI type
+        our_event = ora.ResponseTextDone(text="Hello world")
+        assert our_event.type == openai_type
 
     def test_response_audio_done_type_change(self):
         """Document the response.audio.done -> response.output_audio.done change."""
-        our_type = "response.audio.done"
-        openai_type = "response.output_audio.done"  # OpenAI likely uses this
+        old_type = "response.audio.done"
+        openai_type = "response.output_audio.done"
 
-        assert our_type != openai_type
+        # Our event now uses the new OpenAI type
+        our_event = ora.ResponseAudioDone()
+        assert our_event.type == openai_type
 
     def test_session_object_needs_type_field(self):
         """Document that Session object has a 'type' field for OpenAI."""

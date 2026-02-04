@@ -316,7 +316,7 @@ class ResponseContentPartDone(BaseEvent[Literal["response.content_part.done"]]):
     part: dict[str, Any]  # ContentPart
 
 
-class ResponseTextDelta(BaseEvent[Literal["response.text.delta"]]):
+class ResponseTextDelta(BaseEvent[Literal["response.output_text.delta"]]):
     """Incremental text response chunk (server event)."""
     delta: str
     response_id: str | None = None
@@ -325,7 +325,7 @@ class ResponseTextDelta(BaseEvent[Literal["response.text.delta"]]):
     content_index: int | None = None
 
 
-class ResponseTextDone(BaseEvent[Literal["response.text.done"]]):
+class ResponseTextDone(BaseEvent[Literal["response.output_text.done"]]):
     """Final text response (server event)."""
     text: str
     response_id: str | None = None
@@ -335,7 +335,7 @@ class ResponseTextDone(BaseEvent[Literal["response.text.done"]]):
 
 
 class ResponseAudioTranscriptDelta(
-    BaseEvent[Literal["response.audio_transcript.delta"]]
+    BaseEvent[Literal["response.output_audio_transcript.delta"]]
 ):
     """Incremental audio transcript chunk (server event)."""
     delta: str
@@ -346,7 +346,7 @@ class ResponseAudioTranscriptDelta(
 
 
 class ResponseAudioTranscriptDone(
-    BaseEvent[Literal["response.audio_transcript.done"]]
+    BaseEvent[Literal["response.output_audio_transcript.done"]]
 ):
     """Final audio transcript (server event)."""
     transcript: str
@@ -356,7 +356,7 @@ class ResponseAudioTranscriptDone(
     content_index: int | None = None
 
 
-class ResponseAudioDelta(BaseEvent[Literal["response.audio.delta"]]):
+class ResponseAudioDelta(BaseEvent[Literal["response.output_audio.delta"]]):
     """Incremental audio response chunk (server event)."""
     delta: str  # Base64-encoded Opus audio data
     response_id: str | None = None
@@ -365,7 +365,7 @@ class ResponseAudioDelta(BaseEvent[Literal["response.audio.delta"]]):
     content_index: int | None = None
 
 
-class ResponseAudioDone(BaseEvent[Literal["response.audio.done"]]):
+class ResponseAudioDone(BaseEvent[Literal["response.output_audio.done"]]):
     """Audio response finished (server event)."""
     response_id: str | None = None
     item_id: str | None = None

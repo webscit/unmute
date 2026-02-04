@@ -96,13 +96,13 @@
       "description": "Response should have content part"
     },
     {
-      "event_type": "response.text.delta",
+      "event_type": "response.output_text.delta",
       "min_occurrences": 1,
       "timeout_ms": 5000,
       "description": "Response should stream text deltas"
     },
     {
-      "event_type": "response.text.done",
+      "event_type": "response.output_text.done",
       "min_occurrences": 1,
       "max_occurrences": 1,
       "timeout_ms": 5000,
@@ -140,7 +140,7 @@
     },
     {
       "before": "response.created",
-      "after": "response.text.delta",
+      "after": "response.output_text.delta",
       "strict": true,
       "description": "Response must be created before content deltas"
     },
@@ -151,8 +151,8 @@
       "description": "Output item should be added before content parts"
     },
     {
-      "before": "response.text.delta",
-      "after": "response.text.done",
+      "before": "response.output_text.delta",
+      "after": "response.output_text.done",
       "strict": false,
       "description": "Text deltas must come before text.done"
     },
