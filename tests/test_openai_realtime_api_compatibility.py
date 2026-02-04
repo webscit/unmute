@@ -888,7 +888,7 @@ class TestCriticalAPIChanges:
         assert our_type != openai_type
 
     def test_session_object_needs_type_field(self):
-        """Document that Session object needs a 'type' field for OpenAI."""
+        """Document that Session object has a 'type' field for OpenAI."""
         session = ora.Session(
             modalities=["text", "audio"],
             voice="alloy",
@@ -896,12 +896,13 @@ class TestCriticalAPIChanges:
 
         payload = session.model_dump()
 
-        # Our session doesn't have a 'type' field
-        assert "type" not in payload or payload.get("type") is None
+        # Our session now has a 'type' field
+        assert "type" in payload
+        assert payload["type"] in ["realtime", "transcription"]
 
         # OpenAI expects either:
-        # - type="session" for regular sessions
-        # - type="transcription_session" for transcription-only sessions
+        # - type="realtime" for regular sessions (default)
+        # - type="transcription" for transcription-only sessions
 
     def test_transcription_completed_needs_usage(self):
         """Document that transcription completed needs 'usage' field."""

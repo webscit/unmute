@@ -67,6 +67,7 @@ class Session(BaseModel):
     """Session configuration object."""
     id: str | None = None
     object: Literal["realtime.session"] = "realtime.session"
+    type: Literal['realtime', 'transcription'] = 'realtime'
     model: str | None = None
     modalities: list[str] | None = None
     # The "Instructions" object is an Unmute extension
