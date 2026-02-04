@@ -1,4 +1,4 @@
-"""Health check service for monitoring backend service availability."""
+"""Health check service for monitoring backend service availability and realtime capacity."""
 
 import asyncio
 import logging
@@ -15,8 +15,14 @@ from unmute.kyutai_constants import (
     VOICE_CLONING_SERVER,
 )
 from unmute.service_discovery import async_ttl_cached
+from unmute import metrics as mt
 
 logger = logging.getLogger(__name__)
+
+# Health thresholds for capacity management
+MAX_OUTPUT_QUEUE_SIZE = 75  # Between warning (50) and error (100) thresholds
+MAX_EMIT_QUEUE_SIZE = 50
+MAX_ACTIVE_SESSIONS = 10  # Adjust based on deployment capacity
 
 
 def _ws_to_http(ws_url: str) -> str:
@@ -39,17 +45,55 @@ def _check_server_status(server_url: str, headers: dict | None = None) -> bool:
         return False
 
 
+class RealtimeCapacity(BaseModel):
+    """Realtime pipeline capacity metrics."""
+
+    output_queue_size: int
+    emit_queue_size: int
+    active_sessions: int
+    stt_active_sessions: int
+    vllm_active_sessions: int
+    tts_active_sessions: int
+
+    @computed_field
+    @property
+    def has_capacity(self) -> bool:
+        """Check if system has capacity for new sessions."""
+        return (
+            self.output_queue_size < MAX_OUTPUT_QUEUE_SIZE
+            and self.emit_queue_size < MAX_EMIT_QUEUE_SIZE
+            and self.active_sessions < MAX_ACTIVE_SESSIONS
+        )
+
+
 class HealthStatus(BaseModel):
     tts_up: bool
     stt_up: bool
     llm_up: bool
     voice_cloning_up: bool
+    capacity: RealtimeCapacity | None = None
 
     @computed_field
     @property
     def ok(self) -> bool:
         # Note that voice cloning is not required for the server to be healthy.
-        return self.tts_up and self.stt_up and self.llm_up
+        services_ok = self.tts_up and self.stt_up and self.llm_up
+        # If capacity info is available, also check capacity
+        if self.capacity is not None:
+            return services_ok and self.capacity.has_capacity
+        return services_ok
+
+
+def _get_realtime_capacity() -> RealtimeCapacity:
+    """Gather current realtime capacity metrics from Prometheus gauges."""
+    return RealtimeCapacity(
+        output_queue_size=int(mt.OUTPUT_QUEUE_SIZE._value.get()),
+        emit_queue_size=int(mt.EMIT_QUEUE_SIZE._value.get()),
+        active_sessions=int(mt.ACTIVE_SESSIONS._value.get()),
+        stt_active_sessions=int(mt.STT_ACTIVE_SESSIONS._value.get()),
+        vllm_active_sessions=int(mt.VLLM_ACTIVE_SESSIONS._value.get()),
+        tts_active_sessions=int(mt.TTS_ACTIVE_SESSIONS._value.get()),
+    )
 
 
 @partial(async_ttl_cached, ttl_sec=0.5)
@@ -87,14 +131,65 @@ async def _get_health(
         llm_up_res = await llm_up
         voice_cloning_up_res = await voice_cloning_up
 
+    # Gather realtime capacity metrics
+    capacity = _get_realtime_capacity()
+
     return HealthStatus(
         tts_up=tts_up_res,
         stt_up=stt_up_res,
         llm_up=llm_up_res,
         voice_cloning_up=voice_cloning_up_res,
+        capacity=capacity,
     )
 
 
 async def get_health() -> HealthStatus:
-    """Get the current health status of all backend services."""
+    """Get the current health status of all backend services and realtime capacity."""
     return await _get_health(None)
+
+
+async def check_session_admission() -> tuple[bool, str]:
+    """
+    Check if the system can admit a new session based on health probes.
+
+    Returns:
+        tuple[bool, str]: (can_admit, reason)
+            - can_admit: True if system can accept new session
+            - reason: Empty string if can admit, otherwise reason for rejection
+    """
+    health = await get_health()
+
+    # Check external service availability
+    if not health.tts_up:
+        return False, "TTS service unavailable"
+    if not health.stt_up:
+        return False, "STT service unavailable"
+    if not health.llm_up:
+        return False, "LLM service unavailable"
+
+    # Check realtime capacity
+    if health.capacity is None:
+        logger.warning("Capacity metrics unavailable, allowing admission")
+        return True, ""
+
+    capacity = health.capacity
+
+    if capacity.output_queue_size >= MAX_OUTPUT_QUEUE_SIZE:
+        return (
+            False,
+            f"Output queue size ({capacity.output_queue_size}) exceeds threshold ({MAX_OUTPUT_QUEUE_SIZE})",
+        )
+
+    if capacity.emit_queue_size >= MAX_EMIT_QUEUE_SIZE:
+        return (
+            False,
+            f"Emit queue size ({capacity.emit_queue_size}) exceeds threshold ({MAX_EMIT_QUEUE_SIZE})",
+        )
+
+    if capacity.active_sessions >= MAX_ACTIVE_SESSIONS:
+        return (
+            False,
+            f"Active sessions ({capacity.active_sessions}) at capacity ({MAX_ACTIVE_SESSIONS})",
+        )
+
+    return True, ""

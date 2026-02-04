@@ -30,7 +30,7 @@ from unmute.exceptions import (
     make_ora_error,
 )
 from unmute.kyutai_constants import MAX_VOICE_FILE_SIZE_MB
-from unmute.services.health_service import get_health
+from unmute.services.health_service import check_session_admission, get_health
 from unmute.services.websocket_session_manager import WebSocketSessionManager
 from unmute.timer import Stopwatch
 from unmute.tts.voice_cloning import clone_voice
@@ -97,6 +97,34 @@ async def health_endpoint():
     health = await get_health()
     mt.HEALTH_OK.observe(health.ok)
     return health
+
+
+@app.get("/healthz")
+async def liveness_probe():
+    """
+    Liveness probe for Kubernetes.
+    Returns 200 if the application is alive and running.
+    """
+    # Basic liveness check - just ensure the app is responding
+    return {"status": "alive"}
+
+
+@app.get("/readyz")
+async def readiness_probe():
+    """
+    Readiness probe for Kubernetes.
+    Returns 200 if the system is ready to accept new sessions.
+    Returns 503 if the system is overloaded or dependencies are unavailable.
+    """
+    can_admit, reason = await check_session_admission()
+
+    if not can_admit:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"ready": False, "reason": reason},
+        )
+
+    return {"ready": True, "reason": ""}
 
 
 @app.get("/v1/voices")
@@ -197,6 +225,17 @@ async def websocket_route(websocket: WebSocket):
     valid, error = await perform_handshake_validation(websocket)
     if not valid and error is not None:
         logger.info(f"WebSocket handshake failed: {error.error.message}")
+        await reject_connection_with_error(websocket, error)
+        return
+
+    # Check if system can admit new session based on health probes
+    can_admit, reason = await check_session_admission()
+    if not can_admit:
+        logger.warning(f"Session admission denied: {reason}")
+        error = make_ora_error(
+            code="server_overloaded",
+            message=f"Server is overloaded: {reason}. Please try again later.",
+        )
         await reject_connection_with_error(websocket, error)
         return
 
