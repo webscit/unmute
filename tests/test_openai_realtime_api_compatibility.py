@@ -910,10 +910,11 @@ class TestCriticalAPIChanges:
 
         payload = json.loads(event.model_dump_json())
 
-        # Our event doesn't have 'usage'
-        assert "usage" not in payload
+        # Our event now has 'usage' field
+        assert "usage" in payload
 
         # OpenAI expects usage: { total_tokens, input_tokens, output_tokens }
+        # Our implementation supports this via UsageStats
 
 
 @pytest.mark.skipif(not OPENAI_TYPES_AVAILABLE, reason="openai package types not available")

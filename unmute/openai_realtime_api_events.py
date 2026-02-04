@@ -442,6 +442,7 @@ class ConversationItemInputAudioTranscriptionCompleted(
     item_id: str
     content_index: int
     transcript: str
+    usage: UsageStats | None = None
 
 
 class ConversationItemInputAudioTranscriptionFailed(
