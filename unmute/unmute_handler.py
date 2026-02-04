@@ -1,5 +1,4 @@
 import asyncio
-import math
 import time
 from functools import partial
 from logging import getLogger
@@ -19,9 +18,11 @@ from pydantic import BaseModel
 
 import unmute.openai_realtime_api_events as ora
 from unmute import metrics as mt
-from unmute.audio.realtime_buffer import RealtimeAudioBuffer
 from unmute.audio_input_override import AudioInputOverride
 from unmute.exceptions import make_ora_error
+from unmute.handlers.audio_buffer_handler import AudioBufferHandler
+from unmute.handlers.event_router import EventRouter
+from unmute.handlers.vad_handler import VADHandler
 from unmute.kyutai_constants import (
     FRAME_TIME_SEC,
     RECORDINGS_DIR,
@@ -68,17 +69,6 @@ DEBUG_PLOT_HISTORY_SEC = 10.0
 USER_SILENCE_TIMEOUT = 7.0
 FIRST_MESSAGE_TEMPERATURE = 0.7
 FURTHER_MESSAGES_TEMPERATURE = 0.3
-# For this much time, the VAD does not interrupt the bot. This is needed because at
-# least on Mac, the echo cancellation takes a while to kick in, at the start, so the ASR
-# sometimes hears a bit of the TTS audio and interrupts the bot. Only happens on the
-# first message.
-# A word from the ASR can still interrupt the bot.
-UNINTERRUPTIBLE_BY_VAD_TIME_SEC = 3
-
-# Backpressure thresholds - queue sizes that trigger warnings/errors
-OUTPUT_QUEUE_WARNING_THRESHOLD = 50
-OUTPUT_QUEUE_ERROR_THRESHOLD = 100
-BACKPRESSURE_CHECK_INTERVAL = 5.0  # seconds between checks
 
 logger = getLogger(__name__)
 
@@ -105,30 +95,33 @@ class UnmuteHandler(AsyncStreamHandler):
         self.output_queue: asyncio.Queue[HandlerOutput] = asyncio.Queue()
         self.recorder = Recorder(RECORDINGS_DIR) if RECORDINGS_DIR else None
         self.session_state = SessionState()
-        self.audio_buffer = RealtimeAudioBuffer(sample_rate=SAMPLE_RATE)
 
         self.quest_manager = QuestManager()
-
-        self.stt_last_message_time: float = 0
-        self.stt_end_of_flush_time: float | None = None
-        self.stt_flush_timer = Stopwatch()
-
-        self.tts_voice: str | None = None  # Stored separately because TTS is restarted
-        self.tts_output_stopwatch = Stopwatch()
 
         self.chatbot = Chatbot()
         self.openai_client = get_openai_client()
 
+        # Initialize handlers (after dependencies are set up)
+        self.vad_handler = VADHandler(
+            session_state=self.session_state,
+            output_queue=self.output_queue,
+            sample_rate=SAMPLE_RATE,
+        )
+        self.audio_buffer_handler = AudioBufferHandler(
+            sample_rate=SAMPLE_RATE,
+            session_state=self.session_state,
+            chatbot=self.chatbot,
+        )
+        self.event_router = EventRouter(
+            session_state=self.session_state,
+            output_queue=self.output_queue,
+            get_audio_time_callback=self.audio_received_sec,
+        )
+
+        self.tts_voice: str | None = None  # Stored separately because TTS is restarted
+        self.tts_output_stopwatch = Stopwatch()
+
         self.turn_transition_lock = asyncio.Lock()
-
-        # VAD event tracking
-        self.speech_started: bool = False
-        self.speech_start_time: float | None = None
-        self.current_speech_item_id: str | None = None
-
-        # Backpressure monitoring
-        self.last_backpressure_check: float = 0
-        self.backpressure_error_emitted: bool = False
 
         self.debug_dict: dict[str, Any] = {
             "timing": {},
@@ -401,7 +394,7 @@ class UnmuteHandler(AsyncStreamHandler):
         self.n_samples_received += array.shape[0]
 
         # Track samples in both session state and audio buffer for latency tracking
-        self.session_state.add_input_samples(array.shape[0])
+        self.audio_buffer_handler.add_samples(array.shape[0])
 
         # If this doesn't update, it means the receive loop isn't running because
         # the process is busy with something else, which is bad.
@@ -449,58 +442,18 @@ class UnmuteHandler(AsyncStreamHandler):
             self.debug_dict["timing"] = {}
 
         await stt.send_audio(array)
-        if self.stt_end_of_flush_time is None:
+        if not self.vad_handler.is_flushing():
             await self.detect_long_silence()
-            await self.check_backpressure()
+            await self.event_router.check_backpressure()
 
-            if self.determine_pause():
-                async with trace_span(
-                    "stt_flush_pipeline",
-                    histogram=STT_FLUSH_DURATION,
-                    attributes={"pause_score": stt.pause_prediction.value},
-                ):
-                    logger.info("Pause detected")
-
-                    # Calculate audio_end_ms relative to session start
-                    audio_end_ms = int(self.audio_received_sec() * 1000)
-
-                    # Use current speech item_id if available
-                    item_id = self.current_speech_item_id
-
-                    # Emit speech_stopped with metadata
-                    await self.output_queue.put(
-                        ora.InputAudioBufferSpeechStopped(
-                            item_id=item_id,
-                            audio_end_ms=audio_end_ms,
-                        )
-                    )
-                    mt.VAD_SPEECH_STOPPED.inc()
-
-                    # Track latency from speech start to stop
-                    if self.speech_start_time is not None:
-                        speech_duration = self.audio_received_sec() - self.speech_start_time
-                        mt.VAD_SPEECH_DURATION.observe(speech_duration)
-                        logger.info(
-                            f"Speech stopped: item_id={item_id}, audio_end_ms={audio_end_ms}, "
-                            f"duration={speech_duration:.2f}s"
-                        )
-
-                    # Reset speech tracking
-                    self.speech_started = False
-                    self.speech_start_time = None
-
-                    self.stt_end_of_flush_time = stt.current_time + stt.delay_sec
-                    self.stt_flush_timer = Stopwatch()
-                    num_frames = (
-                        int(math.ceil(stt.delay_sec / FRAME_TIME_SEC)) + 1
-                    )  # some safety margin.
-                    zero = np.zeros(SAMPLES_PER_FRAME, dtype=np.float32)
-                    for _ in range(num_frames):
-                        await stt.send_audio(zero)
-            elif (
-                self.chatbot.conversation_state() == "bot_speaking"
-                and stt.pause_prediction.value < 0.4
-                and self.audio_received_sec() > UNINTERRUPTIBLE_BY_VAD_TIME_SEC
+            if self.vad_handler.determine_pause(
+                stt, self.chatbot.conversation_state(), self.debug_dict
+            ):
+                await self.vad_handler.flush_stt(stt, self.audio_received_sec())
+            elif self.vad_handler.should_interrupt_by_vad(
+                self.chatbot.conversation_state(),
+                stt.pause_prediction.value,
+                self.audio_received_sec(),
             ):
                 logger.info("Interruption by STT-VAD")
                 await self.interrupt_bot()
@@ -508,35 +461,8 @@ class UnmuteHandler(AsyncStreamHandler):
         else:
             # We do not try to detect interruption here, the STT would be processing
             # a chunk full of 0, so there is little chance the pause score would indicate an interruption.
-            if stt.current_time > self.stt_end_of_flush_time:
-                self.stt_end_of_flush_time = None
-                elapsed = self.stt_flush_timer.time()
-                rtf = stt.delay_sec / elapsed
-                logger.info(
-                    "Flushing finished, took %.1f ms, RTF: %.1f", elapsed * 1000, rtf
-                )
+            if self.vad_handler.is_flush_complete(stt):
                 await self._generate_response()
-
-    def determine_pause(self) -> bool:
-        stt = self.stt
-        if stt is None:
-            return False
-        if self.chatbot.conversation_state() != "user_speaking":
-            return False
-
-        # This is how much wall clock time has passed since we received the last ASR
-        # message. Assumes the ASR connection is healthy, so that stt.sent_samples is up
-        # to date.
-        time_since_last_message = (
-            stt.sent_samples / self.input_sample_rate
-        ) - self.stt_last_message_time
-        self.debug_dict["time_since_last_message"] = time_since_last_message
-
-        if stt.pause_prediction.value > 0.6:
-            self.debug_dict["timing"]["pause_detection"] = time_since_last_message
-            return True
-        else:
-            return False
 
     async def emit(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
@@ -614,7 +540,7 @@ class UnmuteHandler(AsyncStreamHandler):
                     logger.info("STT-based interruption")
                     await self.interrupt_bot()
 
-                self.stt_last_message_time = data.start_time
+                self.vad_handler.update_stt_message_time(data.start_time)
                 is_new_message = await self.add_chat_message_delta(data.text, "user")
                 if is_new_message:
                     # Ensure we don't stop after the first word if the VAD didn't have
@@ -622,27 +548,9 @@ class UnmuteHandler(AsyncStreamHandler):
                     stt.pause_prediction.value = 0.0
 
                     # Mark speech as started and track timing
-                    if not self.speech_started:
-                        self.speech_started = True
-                        self.speech_start_time = self.audio_received_sec()
-
-                        # Calculate audio_start_ms relative to session start
-                        audio_start_ms = int(self.speech_start_time * 1000)
-
-                        # Get or create pending item_id
-                        item_id = self.session_state.get_pending_input_item_id()
-                        self.current_speech_item_id = item_id
-
-                        # Emit speech_started with metadata
-                        await self.output_queue.put(
-                            ora.InputAudioBufferSpeechStarted(
-                                item_id=item_id,
-                                audio_start_ms=audio_start_ms,
-                            )
-                        )
-                        mt.VAD_SPEECH_STARTED.inc()
-                        logger.info(
-                            f"Speech started: item_id={item_id}, audio_start_ms={audio_start_ms}"
+                    if not self.vad_handler.speech_started:
+                        await self.vad_handler.mark_speech_started(
+                            self.audio_received_sec()
                         )
         except websockets.ConnectionClosed:
             logger.info("STT connection closed while receiving messages.")
@@ -784,9 +692,7 @@ class UnmuteHandler(AsyncStreamHandler):
         await self.output_queue.put(ora.UnmuteInterruptedByVAD())
 
         # Reset speech tracking state after interruption
-        self.speech_started = False
-        self.speech_start_time = None
-        # Note: Keep current_speech_item_id for the interrupted segment
+        self.vad_handler.reset_speech_tracking()
 
         await self.quest_manager.remove("tts")
         await self.quest_manager.remove("llm")
@@ -832,40 +738,6 @@ class UnmuteHandler(AsyncStreamHandler):
 
             await self.add_chat_message_delta(USER_SILENCE_MARKER, "user")
 
-    async def check_backpressure(self):
-        """Monitor output queue size and emit errors if backpressure threshold exceeded."""
-        current_time = self.audio_received_sec()
-
-        # Only check periodically to avoid overhead
-        if current_time - self.last_backpressure_check < BACKPRESSURE_CHECK_INTERVAL:
-            return
-
-        self.last_backpressure_check = current_time
-        queue_size = self.output_queue.qsize()
-
-        # Update metrics
-        mt.OUTPUT_QUEUE_SIZE.set(queue_size)
-
-        if queue_size >= OUTPUT_QUEUE_ERROR_THRESHOLD:
-            if not self.backpressure_error_emitted:
-                logger.error(
-                    f"Backpressure error: output queue size {queue_size} exceeds threshold {OUTPUT_QUEUE_ERROR_THRESHOLD}"
-                )
-                error = make_ora_error(
-                    type="backpressure_error",
-                    message=f"Output queue backpressure: {queue_size} items queued (threshold: {OUTPUT_QUEUE_ERROR_THRESHOLD})",
-                )
-                await self.output_queue.put(error)
-                mt.BACKPRESSURE_ERRORS.inc()
-                self.backpressure_error_emitted = True
-        elif queue_size >= OUTPUT_QUEUE_WARNING_THRESHOLD:
-            logger.warning(
-                f"Backpressure warning: output queue size {queue_size} exceeds warning threshold {OUTPUT_QUEUE_WARNING_THRESHOLD}"
-            )
-        else:
-            # Reset error flag when queue drains below threshold
-            self.backpressure_error_emitted = False
-
     # === Client Event Handlers ===
 
     async def handle_response_create(
@@ -909,7 +781,7 @@ class UnmuteHandler(AsyncStreamHandler):
 
         # Also add to chatbot history if it's a user or assistant message
         if item.role and item.content:
-            text_content = self._extract_text_content(item.content)
+            text_content = self.event_router._extract_text_content(item.content)
             if text_content:
                 self.chatbot.chat_history.append({
                     "role": item.role,
@@ -953,48 +825,11 @@ class UnmuteHandler(AsyncStreamHandler):
 
         Returns tuple of (item_id, previous_item_id).
         """
-        previous_item_id = self.session_state.get_previous_item_id()
-        item_id = self.session_state.commit_input_buffer()
-
-        # Commit audio buffer and capture latency metrics
-        total_samples, latency_metrics = self.audio_buffer.commit(item_id)
-        logger.debug(
-            f"Audio buffer committed: {total_samples} samples, "
-            f"latency={latency_metrics.arrival_to_flush_ms}ms"
-        )
-
-        # Update transcript from last user message if available
-        last_user_msg = self.chatbot.last_message("user")
-        if last_user_msg and item_id in self.session_state.items:
-            item = self.session_state.items[item_id]
-            if item.content:
-                item.content[0]["transcript"] = last_user_msg
-
-        # Reset audio buffer for next segment
-        self.audio_buffer.reset()
-
-        return item_id, previous_item_id
+        return await self.audio_buffer_handler.commit_audio_buffer()
 
     async def clear_audio_buffer(self) -> None:
         """Clear the input audio buffer without committing."""
-        self.session_state.clear_input_buffer()
-        cleared_samples = self.audio_buffer.clear()
-        logger.debug(f"Audio buffer cleared: {cleared_samples} samples discarded")
-        self.audio_buffer.reset()
-
-    def _extract_text_content(self, content: list[dict[str, Any]]) -> str:
-        """Extract text from content parts."""
-        texts = []
-        for part in content:
-            if part.get("type") == "text":
-                texts.append(part.get("text", ""))
-            elif part.get("type") == "input_text":
-                texts.append(part.get("text", ""))
-            elif part.get("type") in ("audio", "input_audio"):
-                transcript = part.get("transcript")
-                if transcript:
-                    texts.append(transcript)
-        return " ".join(texts)
+        await self.audio_buffer_handler.clear_audio_buffer()
 
     def validate_tool_call(self, tool_name: str, arguments_json: str) -> BaseModel:
         """Validate and parse a tool call into a typed dataclass.

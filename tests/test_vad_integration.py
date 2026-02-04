@@ -23,7 +23,6 @@ class TestVADIntegration:
     async def handler_with_stt(self):
         """Create handler with mocked STT that simulates real behavior."""
         with patch("unmute.unmute_handler.get_openai_client"):
-            with patch("unmute.unmute_handler.get_openai_client"):
             handler = UnmuteHandler()
 
             # Mock chatbot
@@ -206,7 +205,6 @@ class TestBackpressureIntegration:
     def handler(self):
         """Create handler for backpressure testing."""
         with patch("unmute.unmute_handler.get_openai_client"):
-            with patch("unmute.unmute_handler.get_openai_client"):
             handler = UnmuteHandler()
             handler.chatbot = MagicMock()
             handler.chatbot.conversation_state = MagicMock(return_value="user_speaking")
