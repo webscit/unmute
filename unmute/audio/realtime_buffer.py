@@ -351,27 +351,33 @@ class RealtimeAudioBuffer:
 
         Runs Opus decoding in a thread pool for better async performance.
         """
-        # Run decode in thread to avoid blocking event loop with instrumentation
-        async with trace_span(
-            "opus_decode",
-            histogram=AUDIO_INGESTION_DURATION,
-            attributes={"opus_bytes": len(opus_bytes)},
-        ):
-            pcm = await asyncio.to_thread(self._opus_reader.append_bytes, opus_bytes)
-
+        # Check state first (before expensive decode operation)
         if self._state != BufferState.ACCUMULATING:
             logger.warning(f"Attempted to append to buffer in state {self._state.name}")
             return None
 
-        # Wait for first valid Opus packet
+        # Wait for first valid Opus packet (before decode to avoid errors)
         if self._wait_for_first_opus:
             if len(opus_bytes) > 5 and opus_bytes[5] & 2:
                 self._wait_for_first_opus = False
             else:
                 return None
 
+        # Overflow protection (before decode)
         if self._total_samples >= self._max_buffer_samples:
             logger.warning(f"Buffer overflow protection: {self._total_samples} samples")
+            return None
+
+        # Run decode in thread to avoid blocking event loop with instrumentation
+        try:
+            async with trace_span(
+                "opus_decode",
+                histogram=AUDIO_INGESTION_DURATION,
+                attributes={"opus_bytes": len(opus_bytes)},
+            ):
+                pcm = await asyncio.to_thread(self._opus_reader.append_bytes, opus_bytes)
+        except ValueError as e:
+            logger.warning(f"Invalid Opus data: {e}")
             return None
 
         if pcm.size == 0:

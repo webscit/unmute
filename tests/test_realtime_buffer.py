@@ -10,9 +10,7 @@ Tests the per-session audio buffer manager for:
 """
 # pyright: reportPrivateUsage=false
 
-import asyncio
-import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import numpy as np
 import pytest
@@ -23,7 +21,6 @@ from unmute.audio.realtime_buffer import (
     BufferState,
     CodecMetadata,
     LatencyMetrics,
-    OpusDecoder,
     RealtimeAudioBuffer,
 )
 from unmute.kyutai_constants import SAMPLE_RATE
@@ -283,7 +280,7 @@ class TestRealtimeAudioBufferAppend:
         """Test that anonymized recording hook is called on append."""
         records = []
 
-        def on_recorded(record):
+        def on_recorded(record: AnonymizedFrameRecord):
             records.append(record)
 
         mock_decoder = MockOpusDecoder(np.zeros(960, dtype=np.float32))
@@ -597,6 +594,69 @@ class TestRealtimeAudioBufferAsync:
 
         assert result is not None
         assert buffer.total_samples == 960
+
+    async def test_append_opus_async_waits_for_first_packet(self):
+        """Test that async append waits for first valid Opus packet."""
+        mock_decoder = MockOpusDecoder(np.zeros(960, dtype=np.float32))
+        buffer = RealtimeAudioBuffer(opus_decoder=mock_decoder)
+
+        # Send invalid data without first-packet bit
+        fake_opus_no_start = bytes([0] * 10)
+        result = await buffer.append_opus_async(fake_opus_no_start)
+
+        # Should skip without calling decoder
+        assert result is None
+        assert buffer.total_samples == 0
+        assert len(mock_decoder.calls) == 0  # Decoder should not be called
+
+    async def test_append_opus_async_handles_invalid_opus_data(self):
+        """Test that async append handles invalid Opus data gracefully."""
+
+        class FailingOpusDecoder:
+            """Mock decoder that throws ValueError on invalid data."""
+
+            def append_bytes(self, data: bytes) -> np.ndarray:
+                # Simulate the real Opus decoder's ValueError
+                raise ValueError("unexpected ogg capture pattern [0, 0, 0, 0]")
+
+        buffer = RealtimeAudioBuffer(opus_decoder=FailingOpusDecoder())
+        buffer._wait_for_first_opus = False  # Skip first packet check
+
+        # This should not crash, just return None
+        result = await buffer.append_opus_async(b"invalid_data")
+
+        assert result is None
+        assert buffer.total_samples == 0
+
+    async def test_append_opus_async_skips_decode_in_wrong_state(self):
+        """Test that async append skips decode when in wrong state."""
+        mock_decoder = MockOpusDecoder(np.zeros(960, dtype=np.float32))
+        buffer = RealtimeAudioBuffer(opus_decoder=mock_decoder)
+        buffer._wait_for_first_opus = False
+        buffer._state = BufferState.COMMITTED
+
+        result = await buffer.append_opus_async(b"fake")
+
+        # Should return None without calling decoder
+        assert result is None
+        assert len(mock_decoder.calls) == 0
+
+    async def test_append_opus_async_skips_decode_on_overflow(self):
+        """Test that async append skips decode when buffer is full."""
+        mock_decoder = MockOpusDecoder(np.zeros(960, dtype=np.float32))
+        buffer = RealtimeAudioBuffer(
+            max_buffer_samples=1000, opus_decoder=mock_decoder
+        )
+        buffer._wait_for_first_opus = False
+
+        # Fill buffer to limit
+        buffer._total_samples = 1000
+
+        result = await buffer.append_opus_async(b"fake")
+
+        # Should return None without calling decoder
+        assert result is None
+        assert len(mock_decoder.calls) == 0
 
     async def test_stream_to_stt(self):
         """Test streaming to STT."""
