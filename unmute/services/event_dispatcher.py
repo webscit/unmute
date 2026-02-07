@@ -34,7 +34,7 @@ class EventDispatcher:
         self.handler = handler
         self.emit_queue = emit_queue
         self.negotiated_session = negotiated_session
-        self.audio_buffer = handler.audio_buffer
+        self.audio_buffer = handler.audio_buffer_handler.audio_buffer
 
     async def dispatch(self, message: ora.ClientEvent) -> ora.ClientEvent | None:
         """Dispatch a client event to the appropriate handler.
