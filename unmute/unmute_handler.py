@@ -870,7 +870,7 @@ class UnmuteHandler(AsyncStreamHandler):
             tool_choice = session.tool_choice
 
         if instructions:
-            self.chatbot.set_instructions(instructions)
+            self.chatbot.set_instructions(instructions)  # type: ignore[arg-type]
 
         if voice:
             self.tts_voice = voice

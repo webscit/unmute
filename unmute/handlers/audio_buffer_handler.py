@@ -78,4 +78,4 @@ class AudioBufferHandler:
         Returns:
             Duration in seconds
         """
-        return self.audio_buffer.duration_sec()
+        return self.audio_buffer.duration_sec

@@ -2,7 +2,7 @@
 
 import asyncio
 from logging import getLogger
-from typing import Any
+from typing import Any, Callable
 
 from unmute import metrics as mt
 from unmute.exceptions import make_ora_error
@@ -23,7 +23,7 @@ class EventRouter:
         self,
         session_state: SessionState,
         output_queue: asyncio.Queue,
-        get_audio_time_callback,
+        get_audio_time_callback: Callable[[], float],
     ) -> None:
         """Initialize event router.
 

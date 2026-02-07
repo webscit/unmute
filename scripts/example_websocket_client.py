@@ -199,7 +199,7 @@ async def connect_and_run(url: str, api_key: str | None = None) -> None:
     try:
         async with websockets.connect(
             url,
-            subprotocols=[SUBPROTOCOL],
+            subprotocols=[SUBPROTOCOL],  # type: ignore[arg-type]
             additional_headers=headers,
         ) as websocket:
             logger.info("Connected successfully!")
