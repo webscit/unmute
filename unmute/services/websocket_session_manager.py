@@ -4,12 +4,13 @@ import asyncio
 import base64
 import json
 import logging
+from typing import Annotated
 
 import sphn
 from fastapi import WebSocket, WebSocketDisconnect, status
 from fastapi.websockets import WebSocketState
 from fastrtc import AdditionalOutputs, CloseStream, audio_to_float32
-from pydantic import Annotated, Field, TypeAdapter, ValidationError
+from pydantic import Field, TypeAdapter, ValidationError
 
 import unmute.openai_realtime_api_events as ora
 from unmute import metrics as mt
@@ -24,7 +25,7 @@ from unmute.tracing import (
     trace_span,
 )
 from unmute.unmute_handler import UnmuteHandler
-from unmute.websocket_auth import REALTIME_SUBPROTOCOL, NegotiatedSession
+from unmute.websocket_auth import NegotiatedSession
 
 from .event_dispatcher import EventDispatcher
 from .health_service import get_health

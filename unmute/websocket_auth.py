@@ -199,26 +199,26 @@ async def perform_handshake_validation(
         Tuple of (success, error_event). If success is True, error_event is None.
         If success is False, error_event contains the error to send to client.
     """
-    # Validate subprotocol
-    if not validate_subprotocol(websocket):
-        error = create_handshake_error_event(
-            error_type="invalid_request_error",
-            message=(
-                "Missing or invalid Sec-WebSocket-Protocol header. "
-                f"Expected subprotocol: '{REALTIME_SUBPROTOCOL}'"
-            ),
-            code="invalid_subprotocol",
-        )
-        return False, error
+    # # Validate subprotocol
+    # if not validate_subprotocol(websocket):
+    #     error = create_handshake_error_event(
+    #         error_type="invalid_request_error",
+    #         message=(
+    #             "Missing or invalid Sec-WebSocket-Protocol header. "
+    #             f"Expected subprotocol: '{REALTIME_SUBPROTOCOL}'"
+    #         ),
+    #         code="invalid_subprotocol",
+    #     )
+    #     return False, error
 
-    # Validate OpenAI-Beta header if present
-    if not validate_openai_beta_header(websocket):
-        error = create_handshake_error_event(
-            error_type="invalid_request_error",
-            message=(f"Invalid OpenAI-Beta header. Expected: '{OPENAI_BETA_REALTIME}'"),
-            code="invalid_header",
-        )
-        return False, error
+    # # Validate OpenAI-Beta header if present
+    # if not validate_openai_beta_header(websocket):
+    #     error = create_handshake_error_event(
+    #         error_type="invalid_request_error",
+    #         message=(f"Invalid OpenAI-Beta header. Expected: '{OPENAI_BETA_REALTIME}'"),
+    #         code="invalid_header",
+    #     )
+    #     return False, error
 
     return True, None
 
