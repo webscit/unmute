@@ -240,7 +240,8 @@ async def reject_connection_with_error(
     """
     # We need to accept to send a message, even if we're going to close
     try:
-        await websocket.accept(subprotocol=REALTIME_SUBPROTOCOL)
+        # await websocket.accept(subprotocol=REALTIME_SUBPROTOCOL)
+        await websocket.accept()
         await websocket.send_text(error.model_dump_json())
         await websocket.close(code=close_code, reason=error.error.message)
     except Exception as e:

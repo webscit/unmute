@@ -260,7 +260,8 @@ async def websocket_route(websocket: WebSocket):
             # protocol(s) it supports and OpenAI uses "realtime" as the value. If we
             # don't set this, the client will think this is not the right endpoint and
             # will not connect.
-            await websocket.accept(subprotocol=REALTIME_SUBPROTOCOL)
+            # await websocket.accept(subprotocol=REALTIME_SUBPROTOCOL)
+            await websocket.accept()
 
             handler = UnmuteHandler()
 
