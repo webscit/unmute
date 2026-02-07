@@ -837,21 +837,6 @@ class UnmuteHandler(AsyncStreamHandler):
         """Clear the input audio buffer without committing."""
         await self.audio_buffer_handler.clear_audio_buffer()
 
-    def validate_tool_call(self, tool_name: str, arguments_json: str) -> BaseModel:
-        """Validate and parse a tool call into a typed dataclass.
-
-        Args:
-            tool_name: Name of the tool being called.
-            arguments_json: JSON string containing the tool arguments.
-
-        Returns:
-            Validated Pydantic model instance for the tool's arguments.
-
-        Raises:
-            ValueError: If tool_name is unknown or arguments are invalid.
-        """
-        return validate_and_parse_tool_call(tool_name, arguments_json)
-
     async def update_session(self, session: ora.Session | dict[str, Any]):
         # Handle both Session objects and dict-based configs
         if isinstance(session, dict):
