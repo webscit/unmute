@@ -29,10 +29,14 @@ import sys
 
 try:
     import websockets
-    from websockets.client import WebSocketClientProtocol
+    from websockets.asyncio.client import ClientConnection
 except ImportError:
-    print("Error: websockets library required. Install with: pip install websockets")
-    sys.exit(1)
+    try:
+        import websockets
+        from websockets.legacy.client import WebSocketClientProtocol as ClientConnection  # type: ignore[assignment]
+    except ImportError:
+        print("Error: websockets library required. Install with: pip install websockets")
+        sys.exit(1)
 
 
 logging.basicConfig(
@@ -106,7 +110,7 @@ def create_session_update(
     }
 
 
-async def handle_server_messages(websocket: WebSocketClientProtocol) -> None:
+async def handle_server_messages(websocket: ClientConnection) -> None:
     """Handle incoming messages from the server.
 
     Args:
@@ -148,7 +152,7 @@ async def handle_server_messages(websocket: WebSocketClientProtocol) -> None:
             logger.error(f"Failed to parse server message: {message[:100]}")
 
 
-async def send_test_messages(websocket: WebSocketClientProtocol) -> None:
+async def send_test_messages(websocket: ClientConnection) -> None:
     """Send test messages to demonstrate the API.
 
     Args:
@@ -207,7 +211,7 @@ async def connect_and_run(url: str, api_key: str | None = None) -> None:
 
             # Wait for either task to complete or be cancelled
             try:
-                done, pending = await asyncio.wait(
+                done, _pending = await asyncio.wait(
                     [receive_task, send_task],
                     return_when=asyncio.FIRST_EXCEPTION,
                 )
@@ -231,10 +235,10 @@ async def connect_and_run(url: str, api_key: str | None = None) -> None:
                         except asyncio.CancelledError:
                             pass
 
-    except websockets.exceptions.InvalidStatusCode as e:
+    except websockets.exceptions.InvalidStatusCode as e:  # type: ignore[attr-defined]
         logger.error(f"Connection rejected with status {e.status_code}")
         sys.exit(1)
-    except websockets.exceptions.InvalidHandshake as e:
+    except websockets.exceptions.InvalidHandshake as e:  # type: ignore[attr-defined]
         logger.error(f"WebSocket handshake failed: {e}")
         sys.exit(1)
     except ConnectionRefusedError:

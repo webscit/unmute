@@ -7,6 +7,7 @@ Tests the complete event flow:
 
 Also tests latency tracking and transcription event emission.
 """
+# pyright: reportPrivateUsage=false
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch

@@ -14,7 +14,7 @@ from tests.realtime_harness.fixture_schema import (
     TimingAssertion,
     TraceFixture,
 )
-from tests.realtime_harness.websocket_replayer import ReceivedEvent, ReplayTrace
+from tests.realtime_harness.websocket_replayer import ReplayTrace
 
 
 @dataclass

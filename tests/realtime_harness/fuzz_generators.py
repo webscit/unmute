@@ -14,7 +14,7 @@ import random
 import uuid
 from typing import Any, Callable, Optional
 
-from .fixture_schema import ClientEvent, EventAssertion, TraceFixture
+from .fixture_schema import ClientEvent, EventAssertion, TimingMode, TraceFixture
 
 
 class FuzzStrategy:
@@ -106,7 +106,7 @@ class OutOfOrderFuzzer(FuzzStrategy):
         mutated.client_events = events
 
         # Clear timing mode to IMMEDIATE since order is now scrambled
-        mutated.timing_mode = "immediate"
+        mutated.timing_mode = TimingMode.IMMEDIATE
         for event in mutated.client_events:
             event.delay_ms = 0
             event.timestamp_ms = None
@@ -299,7 +299,7 @@ def create_edge_case_fixture(
             category=FixtureEventType.ERROR_HANDLING,
             tags=["edge_case", "fuzz"],
         ),
-        timing_mode="relative",
+        timing_mode=TimingMode.RELATIVE,
         client_events=fixture_events,
         event_assertions=assertions,
     )

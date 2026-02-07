@@ -8,6 +8,7 @@ Tests the per-session audio buffer manager for:
 - Latency tracking
 - Overflow protection
 """
+# pyright: reportPrivateUsage=false
 
 import asyncio
 import time

@@ -525,6 +525,8 @@ class UnmuteHandler(AsyncStreamHandler):
                 async with trace_queue_operation("output_queue", "put"):
                     await self.output_queue.put(
                         ora.ConversationItemInputAudioTranscriptionDelta(
+                            item_id=self.session_state.get_pending_input_item_id(),
+                            content_index=0,
                             delta=data.text,
                             start_time=data.start_time,
                         )
@@ -781,7 +783,7 @@ class UnmuteHandler(AsyncStreamHandler):
 
         # Also add to chatbot history if it's a user or assistant message
         if item.role and item.content:
-            text_content = self.event_router._extract_text_content(item.content)
+            text_content = self.event_router._extract_text_content(item.content)  # type: ignore[attr-defined]
             if text_content:
                 self.chatbot.chat_history.append(
                     {

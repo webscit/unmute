@@ -12,7 +12,7 @@ Benchmarks enforce configurable thresholds and generate machine-readable reports
 import statistics
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -23,16 +23,16 @@ class BenchmarkThresholds(BaseModel):
     """Configurable latency thresholds for benchmarks."""
 
     ttft_ms: Optional[int] = Field(
-        1000, description="Time to first token threshold (ms)"
+        default=1000, description="Time to first token threshold (ms)"
     )
     stt_flush_ms: Optional[int] = Field(
-        300, description="STT flush latency threshold (ms)"
+        default=300, description="STT flush latency threshold (ms)"
     )
     tool_call_rtt_ms: Optional[int] = Field(
-        2000, description="Tool call round-trip time threshold (ms)"
+        default=2000, description="Tool call round-trip time threshold (ms)"
     )
     actuator_rtt_ms: Optional[int] = Field(
-        500, description="Actuator command RTT threshold (ms)"
+        default=500, description="Actuator command RTT threshold (ms)"
     )
 
 

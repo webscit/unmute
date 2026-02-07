@@ -2,6 +2,7 @@
 
 Tests health checking, capacity metrics gathering, and session admission gating.
 """
+# pyright: reportPrivateUsage=false
 
 import pytest
 from unittest.mock import Mock, patch, AsyncMock

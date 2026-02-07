@@ -259,6 +259,8 @@ def process_events(recorder_events: list[RecorderEvent]) -> list[StepEvents]:
         elif isinstance(ora_event, ora.ConversationItemInputAudioTranscriptionDelta):
             # The STT transcribed something in the past, so we need to compute the
             # timestamp and retroactively add it to the existing step event
+            if ora_event.start_time is None:
+                continue
             ts_in_question = round_to_multiple(
                 ora_event.start_time * SAMPLE_RATE, SAMPLES_PER_STEP
             )

@@ -45,4 +45,4 @@ repos:
         entry: bash -c 'uv run pyright'
         files: ^unmute/.*$
         pass_filenames: false
-        stages: [pre-push]
+        stages: [pre-commit]

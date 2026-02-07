@@ -87,12 +87,12 @@ class HealthStatus(BaseModel):
 def _get_realtime_capacity() -> RealtimeCapacity:
     """Gather current realtime capacity metrics from Prometheus gauges."""
     return RealtimeCapacity(
-        output_queue_size=int(mt.OUTPUT_QUEUE_SIZE._value.get()),
-        emit_queue_size=int(mt.EMIT_QUEUE_SIZE._value.get()),
-        active_sessions=int(mt.ACTIVE_SESSIONS._value.get()),
-        stt_active_sessions=int(mt.STT_ACTIVE_SESSIONS._value.get()),
-        vllm_active_sessions=int(mt.VLLM_ACTIVE_SESSIONS._value.get()),
-        tts_active_sessions=int(mt.TTS_ACTIVE_SESSIONS._value.get()),
+        output_queue_size=int(mt.OUTPUT_QUEUE_SIZE._value.get()),  # type: ignore[attr-defined]
+        emit_queue_size=int(mt.EMIT_QUEUE_SIZE._value.get()),  # type: ignore[attr-defined]
+        active_sessions=int(mt.ACTIVE_SESSIONS._value.get()),  # type: ignore[attr-defined]
+        stt_active_sessions=int(mt.STT_ACTIVE_SESSIONS._value.get()),  # type: ignore[attr-defined]
+        vllm_active_sessions=int(mt.VLLM_ACTIVE_SESSIONS._value.get()),  # type: ignore[attr-defined]
+        tts_active_sessions=int(mt.TTS_ACTIVE_SESSIONS._value.get()),  # type: ignore[attr-defined]
     )
 
 

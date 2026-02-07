@@ -13,7 +13,7 @@ from typing import Any, Optional
 import websockets
 from websockets.asyncio.client import ClientConnection
 
-from tests.realtime_harness.fixture_schema import ClientEvent, TimingMode, TraceFixture
+from tests.realtime_harness.fixture_schema import TimingMode, TraceFixture
 
 
 @dataclass

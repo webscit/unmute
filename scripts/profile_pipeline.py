@@ -25,7 +25,6 @@ Usage:
 import argparse
 import json
 import subprocess
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -417,12 +416,13 @@ def main():
 
     args = parser.parse_args()
 
+    # Initialize cleanup variables
+    server_proc = None
+    profiling_was_disabled = False
+
     try:
         # Enable profiling
         profiling_was_disabled = enable_profiling()
-
-        # Start server if needed
-        server_proc = None
         if not args.no_server:
             server_proc = start_server(args.port)
 

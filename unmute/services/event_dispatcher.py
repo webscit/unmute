@@ -63,7 +63,7 @@ class EventDispatcher:
 
         # Conversation item management events
         elif isinstance(message, ora.ConversationItemCreate):
-            item, ack = await self.handler.handle_item_create(message)
+            _item, ack = await self.handler.handle_item_create(message)
             await self.emit_queue.put(ack)
             # Record state snapshot after item creation
             if self.handler.recorder is not None:
@@ -136,7 +136,7 @@ class EventDispatcher:
 
         # Check for overflow before appending
         buffer_was_full = (
-            self.audio_buffer.total_samples >= self.audio_buffer._max_buffer_samples
+            self.audio_buffer.total_samples >= self.audio_buffer._max_buffer_samples  # type: ignore[attr-defined]
         )
 
         pcm = await self.audio_buffer.append_opus_async(opus_bytes)
@@ -145,7 +145,7 @@ class EventDispatcher:
         if buffer_was_full and pcm is None:
             error = make_ora_error(
                 type="buffer_overflow",
-                message=f"Audio buffer overflow: {self.audio_buffer.total_samples} samples exceeds maximum {self.audio_buffer._max_buffer_samples}. Frame discarded.",
+                message=f"Audio buffer overflow: {self.audio_buffer.total_samples} samples exceeds maximum {self.audio_buffer._max_buffer_samples}. Frame discarded.",  # type: ignore[attr-defined]
             )
             await self.emit_queue.put(error)
             mt.BUFFER_OVERFLOW_ERRORS.inc()

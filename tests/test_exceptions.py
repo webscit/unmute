@@ -59,18 +59,18 @@ class TestMakeOraError:
 
         # This should raise TypeError (documenting the incorrect usage)
         with pytest.raises(TypeError, match="unexpected keyword argument 'code'"):
-            make_ora_error(code="test_error", message="Test")
+            make_ora_error(code="test_error", message="Test")  # type: ignore[call-arg]
 
     def test_both_parameters_required(self):
         """Test that both type and message are required."""
         with pytest.raises(TypeError):
-            make_ora_error(type="test")
+            make_ora_error(type="test")  # type: ignore[call-arg]
 
         with pytest.raises(TypeError):
-            make_ora_error(message="test")
+            make_ora_error(message="test")  # type: ignore[call-arg]
 
         with pytest.raises(TypeError):
-            make_ora_error()
+            make_ora_error()  # type: ignore[call-arg]
 
     def test_empty_strings_allowed(self):
         """Test that empty strings are allowed for type and message."""

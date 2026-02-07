@@ -31,10 +31,10 @@ class MoveArmArgs(BaseModel):
         ..., ge=0.0, le=1.5, description="Z position in meters (0.0 to 1.5)"
     )
     speed: float = Field(
-        0.5, ge=0.1, le=1.0, description="Movement speed factor (0.1 to 1.0)"
+        default=0.5, ge=0.1, le=1.0, description="Movement speed factor (0.1 to 1.0)"
     )
     timeout_ms: int = Field(
-        5000, ge=100, le=30000, description="Operation timeout in milliseconds"
+        default=5000, ge=100, le=30000, description="Operation timeout in milliseconds"
     )
 
 

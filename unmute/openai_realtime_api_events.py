@@ -187,14 +187,14 @@ class ContentPart(BaseModel):
 class TextContentPart(ContentPart):
     """Text content part."""
 
-    type: Literal["text"] = "text"
+    type: Literal["text"] = "text"  # type: ignore[assignment]
     text: str
 
 
 class AudioContentPart(ContentPart):
     """Audio content part."""
 
-    type: Literal["audio"] = "audio"
+    type: Literal["audio"] = "audio"  # type: ignore[assignment]
     audio: str | None = None  # Base64-encoded audio
     transcript: str | None = None
 
@@ -202,14 +202,14 @@ class AudioContentPart(ContentPart):
 class InputTextContentPart(ContentPart):
     """User text input content part."""
 
-    type: Literal["input_text"] = "input_text"
+    type: Literal["input_text"] = "input_text"  # type: ignore[assignment]
     text: str
 
 
 class InputAudioContentPart(ContentPart):
     """User audio input content part."""
 
-    type: Literal["input_audio"] = "input_audio"
+    type: Literal["input_audio"] = "input_audio"  # type: ignore[assignment]
     audio: str | None = None  # Base64-encoded audio
     transcript: str | None = None
 
@@ -217,7 +217,7 @@ class InputAudioContentPart(ContentPart):
 class ImageContentPart(ContentPart):
     """Image content part for assistant responses."""
 
-    type: Literal["image"] = "image"
+    type: Literal["image"] = "image"  # type: ignore[assignment]
     image_url: dict[str, str] | None = None  # {"url": "data:image/..."}
     detail: Literal["auto", "low", "high"] | None = None
 
@@ -225,7 +225,7 @@ class ImageContentPart(ContentPart):
 class InputImageContentPart(ContentPart):
     """User image input content part."""
 
-    type: Literal["input_image"] = "input_image"
+    type: Literal["input_image"] = "input_image"  # type: ignore[assignment]
     image_url: dict[str, str] | None = None  # {"url": "data:image/..."}
     detail: Literal["auto", "low", "high"] | None = None
 
@@ -233,7 +233,7 @@ class InputImageContentPart(ContentPart):
 class MetadataContentPart(ContentPart):
     """Metadata content part for sensor readings and structured context."""
 
-    type: Literal["metadata"] = "metadata"
+    type: Literal["metadata"] = "metadata"  # type: ignore[assignment]
     key: str
     value: Any
     timestamp: float | None = None  # Unix timestamp

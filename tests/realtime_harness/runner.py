@@ -3,6 +3,7 @@
 This module provides the main runner that launches a FastAPI server, replays
 fixtures, validates responses, and generates reports.
 """
+# pyright: reportPrivateUsage=false
 
 import asyncio
 import json

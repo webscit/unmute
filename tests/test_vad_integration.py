@@ -2,6 +2,7 @@
 
 These tests use simulated audio frames to trigger real event flows.
 """
+# pyright: reportPrivateUsage=false
 
 import asyncio
 import base64

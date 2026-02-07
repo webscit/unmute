@@ -7,6 +7,7 @@ Tests cover:
 - Backpressure threshold monitoring
 - State reset after interruptions
 """
+# pyright: reportPrivateUsage=false
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,13 +16,12 @@ import numpy as np
 import pytest
 
 import unmute.openai_realtime_api_events as ora
-from unmute.session_state import SessionState
-from unmute.unmute_handler import (
+from unmute.handlers.event_router import (
     OUTPUT_QUEUE_ERROR_THRESHOLD,
     OUTPUT_QUEUE_WARNING_THRESHOLD,
-    USER_SILENCE_TIMEOUT,
-    UnmuteHandler,
 )
+from unmute.session_state import SessionState
+from unmute.unmute_handler import USER_SILENCE_TIMEOUT, UnmuteHandler
 
 
 class TestVADEventEmission:

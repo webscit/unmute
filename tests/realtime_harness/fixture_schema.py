@@ -5,9 +5,8 @@ protocol compliance. Fixtures capture sequences of client events, expected serve
 responses, and timing/ordering constraints.
 """
 
-from datetime import timedelta
 from enum import Enum
-from typing import Any, Literal, Optional, Union
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -38,14 +37,14 @@ class ClientEvent(BaseModel):
         ..., description="Raw event payload (will be validated against OpenAI schema)"
     )
     delay_ms: int = Field(
-        0, description="Milliseconds to wait before sending (in RELATIVE timing mode)"
+        default=0, description="Milliseconds to wait before sending (in RELATIVE timing mode)"
     )
     timestamp_ms: Optional[int] = Field(
-        None,
+        default=None,
         description="Absolute timestamp from trace start (in ABSOLUTE timing mode)",
     )
     description: Optional[str] = Field(
-        None, description="Human-readable description of this event"
+        default=None, description="Human-readable description of this event"
     )
 
     @field_validator("delay_ms")
@@ -61,22 +60,22 @@ class EventAssertion(BaseModel):
 
     event_type: str = Field(..., description="Expected event.type field value")
     match_fields: Optional[dict[str, Any]] = Field(
-        None,
+        default=None,
         description="Fields that must match exactly (dot notation supported, e.g., 'session.voice')",
     )
     exclude_fields: Optional[list[str]] = Field(
-        None,
+        default=None,
         description="Fields that should NOT be present (dot notation supported)",
     )
-    min_occurrences: int = Field(1, description="Minimum times this event must occur")
+    min_occurrences: int = Field(default=1, description="Minimum times this event must occur")
     max_occurrences: Optional[int] = Field(
-        None, description="Maximum times this event can occur (None = unlimited)"
+        default=None, description="Maximum times this event can occur (None = unlimited)"
     )
     timeout_ms: int = Field(
-        5000, description="Max milliseconds to wait for this event"
+        default=5000, description="Max milliseconds to wait for this event"
     )
     description: Optional[str] = Field(
-        None, description="Human-readable description of this assertion"
+        default=None, description="Human-readable description of this assertion"
     )
 
     @field_validator("min_occurrences")
@@ -93,11 +92,11 @@ class OrderingAssertion(BaseModel):
     before: str = Field(..., description="Event type that must come before")
     after: str = Field(..., description="Event type that must come after")
     strict: bool = Field(
-        False,
+        default=False,
         description="If True, no events of 'after' type can occur before first 'before'",
     )
     description: Optional[str] = Field(
-        None, description="Human-readable description of this ordering constraint"
+        default=None, description="Human-readable description of this ordering constraint"
     )
 
 
@@ -110,7 +109,7 @@ class TimingAssertion(BaseModel):
         ..., description="Max milliseconds allowed between event_a and event_b"
     )
     description: Optional[str] = Field(
-        None, description="Human-readable description of this timing constraint"
+        default=None, description="Human-readable description of this timing constraint"
     )
 
     @field_validator("max_latency_ms")
@@ -129,7 +128,7 @@ class FixtureMetadata(BaseModel):
     category: FixtureEventType = Field(..., description="Fixture category")
     tags: list[str] = Field(default_factory=list, description="Tags for filtering")
     timeout_seconds: int = Field(
-        30, description="Maximum time for entire fixture to complete"
+        default=30, description="Maximum time for entire fixture to complete"
     )
 
 
@@ -138,7 +137,7 @@ class TraceFixture(BaseModel):
 
     metadata: FixtureMetadata = Field(..., description="Fixture metadata")
     timing_mode: TimingMode = Field(
-        TimingMode.RELATIVE, description="How to interpret timing values"
+        default=TimingMode.RELATIVE, description="How to interpret timing values"
     )
     client_events: list[ClientEvent] = Field(
         ..., description="Sequence of client events to send"
