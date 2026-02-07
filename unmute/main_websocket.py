@@ -233,7 +233,7 @@ async def websocket_route(websocket: WebSocket):
     if not can_admit:
         logger.warning(f"Session admission denied: {reason}")
         error = make_ora_error(
-            code="server_overloaded",
+            type="server_overloaded",
             message=f"Server is overloaded: {reason}. Please try again later.",
         )
         await reject_connection_with_error(websocket, error)
