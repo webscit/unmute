@@ -36,6 +36,7 @@ from unmute.llm.llm_utils import (
     get_openai_client,
     rechunk_to_words,
 )
+from unmute.llm.system_prompt import ConstantInstructions
 from unmute.quest_manager import Quest, QuestManager
 from unmute.recorder import Recorder
 from unmute.service_discovery import find_instance
@@ -870,7 +871,10 @@ class UnmuteHandler(AsyncStreamHandler):
             tool_choice = session.tool_choice
 
         if instructions:
-            self.chatbot.set_instructions(instructions)  # type: ignore[arg-type]
+            # Convert string instructions to ConstantInstructions object
+            if isinstance(instructions, str):
+                instructions = ConstantInstructions(text=instructions)
+            self.chatbot.set_instructions(instructions)
 
         if voice:
             self.tts_voice = voice
