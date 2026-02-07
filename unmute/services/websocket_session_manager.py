@@ -98,10 +98,10 @@ class WebSocketSessionManager:
                     self._receive_loop(emit_queue),
                     name="receive_loop()",
                 )
+                tg.create_task(self._emit_loop(emit_queue), name="emit_loop()")
                 tg.create_task(
-                    self._emit_loop(emit_queue), name="emit_loop()"
+                    self.handler.quest_manager.wait(), name="quest_manager.wait()"
                 )
-                tg.create_task(self.handler.quest_manager.wait(), name="quest_manager.wait()")
                 tg.create_task(debug_running_tasks(), name="debug_running_tasks()")
         finally:
             await self.handler.cleanup()
@@ -112,7 +112,9 @@ class WebSocketSessionManager:
             if trace_ctx:
                 from unmute.tracing import format_trace_summary
 
-                logger.info("Session trace summary:\n%s", format_trace_summary(trace_ctx))
+                logger.info(
+                    "Session trace summary:\n%s", format_trace_summary(trace_ctx)
+                )
 
     async def _receive_loop(self, emit_queue: asyncio.Queue[ora.ServerEvent]):
         """Receive messages from the WebSocket.
@@ -236,7 +238,9 @@ class WebSocketSessionManager:
                 if isinstance(e, RuntimeError):
                     if "Unexpected ASGI message 'websocket.send'" in str(e):
                         # This is expected when the client disconnects
-                        message = f"emit_loop() stopped because WebSocket disconnected: {e}"
+                        message = (
+                            f"emit_loop() stopped because WebSocket disconnected: {e}"
+                        )
                     else:
                         raise
                 else:

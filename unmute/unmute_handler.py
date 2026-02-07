@@ -24,7 +24,6 @@ from unmute.handlers.audio_buffer_handler import AudioBufferHandler
 from unmute.handlers.event_router import EventRouter
 from unmute.handlers.vad_handler import VADHandler
 from unmute.kyutai_constants import (
-    FRAME_TIME_SEC,
     RECORDINGS_DIR,
     SAMPLE_RATE,
     SAMPLES_PER_FRAME,
@@ -46,7 +45,6 @@ from unmute.timer import Stopwatch
 from unmute.tooling.tool_schemas import get_tool_schemas, validate_and_parse_tool_call
 from unmute.tracing import (
     LLM_WORD_GENERATION_DURATION,
-    STT_FLUSH_DURATION,
     TTS_WORD_PROCESSING_DURATION,
     trace_queue_operation,
     trace_span,
@@ -293,7 +291,9 @@ class UnmuteHandler(AsyncStreamHandler):
 
                     if time_to_first_token is None:
                         time_to_first_token = llm_stopwatch.time()
-                        self.debug_dict["timing"]["to_first_token"] = time_to_first_token
+                        self.debug_dict["timing"]["to_first_token"] = (
+                            time_to_first_token
+                        )
                         mt.VLLM_TTFT.observe(time_to_first_token)
                         logger.info("Sending first word to TTS: %s", delta)
 
@@ -725,7 +725,9 @@ class UnmuteHandler(AsyncStreamHandler):
             # state to "user_speaking".
             # The system prompt has a rule that tells it how to handle the "..."
             # messages.
-            silence_duration = self.audio_received_sec() - self.waiting_for_user_start_time
+            silence_duration = (
+                self.audio_received_sec() - self.waiting_for_user_start_time
+            )
             logger.info(f"Long silence detected: {silence_duration:.1f}s")
 
             # Emit compliant error event for silence timeout
@@ -740,9 +742,7 @@ class UnmuteHandler(AsyncStreamHandler):
 
     # === Client Event Handlers ===
 
-    async def handle_response_create(
-        self, event: ora.ResponseCreate
-    ) -> None:
+    async def handle_response_create(self, event: ora.ResponseCreate) -> None:
         """Handle explicit response.create request from client."""
         # If already generating, cancel current response first
         if self.session_state.has_active_response():
@@ -783,10 +783,12 @@ class UnmuteHandler(AsyncStreamHandler):
         if item.role and item.content:
             text_content = self.event_router._extract_text_content(item.content)
             if text_content:
-                self.chatbot.chat_history.append({
-                    "role": item.role,
-                    "content": text_content,
-                })
+                self.chatbot.chat_history.append(
+                    {
+                        "role": item.role,
+                        "content": text_content,
+                    }
+                )
 
         ack = ora.ConversationItemCreated(
             item=item, previous_item_id=event.previous_item_id
@@ -798,7 +800,9 @@ class UnmuteHandler(AsyncStreamHandler):
         self.session_state.delete_item(item_id)
         return ora.ConversationItemDeleted(item_id=item_id)
 
-    def handle_item_retrieve(self, item_id: str) -> ora.ConversationItemRetrieved | None:
+    def handle_item_retrieve(
+        self, item_id: str
+    ) -> ora.ConversationItemRetrieved | None:
         """Retrieve a conversation item."""
         item = self.session_state.get_item(item_id)
         if item is None:
@@ -857,7 +861,9 @@ class UnmuteHandler(AsyncStreamHandler):
         else:
             instructions = session.instructions
             voice = session.voice
-            allow_recording = session.allow_recording if session.allow_recording is not None else True
+            allow_recording = (
+                session.allow_recording if session.allow_recording is not None else True
+            )
             tools = session.tools
             tool_choice = session.tool_choice
 

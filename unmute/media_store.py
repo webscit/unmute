@@ -122,8 +122,7 @@ class MediaStore:
         # Check total storage limits
         if len(self.images) >= MAX_IMAGES_PER_SESSION:
             raise ValueError(
-                f"Too many images in session "
-                f"(max {MAX_IMAGES_PER_SESSION})"
+                f"Too many images in session (max {MAX_IMAGES_PER_SESSION})"
             )
 
         total_size = sum(img.size_bytes for img in self.images.values())

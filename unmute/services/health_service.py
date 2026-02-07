@@ -7,6 +7,7 @@ from functools import partial
 import requests
 from pydantic import BaseModel, computed_field
 
+from unmute import metrics as mt
 from unmute.kyutai_constants import (
     KYUTAI_LLM_API_KEY,
     LLM_SERVER,
@@ -15,7 +16,6 @@ from unmute.kyutai_constants import (
     VOICE_CLONING_SERVER,
 )
 from unmute.service_discovery import async_ttl_cached
-from unmute import metrics as mt
 
 logger = logging.getLogger(__name__)
 

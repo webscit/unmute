@@ -96,9 +96,7 @@ class SessionState:
         self.items[item.id] = item
         self.item_order.append(item.id)
 
-    def complete_response(
-        self, status: str = "completed"
-    ) -> ora.Response:
+    def complete_response(self, status: str = "completed") -> ora.Response:
         """Mark current response as complete and return final Response object."""
         if self.current_response is None:
             raise RuntimeError("No response in progress to complete")
@@ -314,7 +312,9 @@ class SessionState:
             id=item_id,
             type="message",
             role="user",
-            content=[{"type": "metadata", "key": key, "value": value, "timestamp": timestamp}],
+            content=[
+                {"type": "metadata", "key": key, "value": value, "timestamp": timestamp}
+            ],
             status="completed",
         )
         self.items[item_id] = item

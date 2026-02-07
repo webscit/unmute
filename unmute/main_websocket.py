@@ -42,7 +42,6 @@ from unmute.tts.voice_donation import (
 from unmute.tts.voices import VoiceList
 from unmute.unmute_handler import UnmuteHandler
 from unmute.websocket_auth import (
-    REALTIME_SUBPROTOCOL,
     perform_handshake_validation,
     reject_connection_with_error,
 )

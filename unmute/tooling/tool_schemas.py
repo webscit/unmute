@@ -9,7 +9,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-
 # ============================================================================
 # Tool Argument Models
 # ============================================================================
@@ -22,11 +21,21 @@ class MoveArmArgs(BaseModel):
     Units: meters for position, degrees for angles.
     """
 
-    x: float = Field(..., ge=-1.0, le=1.0, description="X position in meters (-1.0 to 1.0)")
-    y: float = Field(..., ge=-1.0, le=1.0, description="Y position in meters (-1.0 to 1.0)")
-    z: float = Field(..., ge=0.0, le=1.5, description="Z position in meters (0.0 to 1.5)")
-    speed: float = Field(0.5, ge=0.1, le=1.0, description="Movement speed factor (0.1 to 1.0)")
-    timeout_ms: int = Field(5000, ge=100, le=30000, description="Operation timeout in milliseconds")
+    x: float = Field(
+        ..., ge=-1.0, le=1.0, description="X position in meters (-1.0 to 1.0)"
+    )
+    y: float = Field(
+        ..., ge=-1.0, le=1.0, description="Y position in meters (-1.0 to 1.0)"
+    )
+    z: float = Field(
+        ..., ge=0.0, le=1.5, description="Z position in meters (0.0 to 1.5)"
+    )
+    speed: float = Field(
+        0.5, ge=0.1, le=1.0, description="Movement speed factor (0.1 to 1.0)"
+    )
+    timeout_ms: int = Field(
+        5000, ge=100, le=30000, description="Operation timeout in milliseconds"
+    )
 
 
 class RotateBaseArgs(BaseModel):
@@ -35,9 +44,15 @@ class RotateBaseArgs(BaseModel):
     Units: degrees for angle, seconds for duration.
     """
 
-    angle: float = Field(..., ge=-180.0, le=180.0, description="Rotation angle in degrees (-180 to 180)")
-    speed: float = Field(0.5, ge=0.1, le=1.0, description="Rotation speed factor (0.1 to 1.0)")
-    timeout_ms: int = Field(3000, ge=100, le=15000, description="Operation timeout in milliseconds")
+    angle: float = Field(
+        ..., ge=-180.0, le=180.0, description="Rotation angle in degrees (-180 to 180)"
+    )
+    speed: float = Field(
+        0.5, ge=0.1, le=1.0, description="Rotation speed factor (0.1 to 1.0)"
+    )
+    timeout_ms: int = Field(
+        3000, ge=100, le=15000, description="Operation timeout in milliseconds"
+    )
 
 
 class SetGazeArgs(BaseModel):
@@ -47,25 +62,41 @@ class SetGazeArgs(BaseModel):
     Units: meters for target, degrees for angles.
     """
 
-    mode: Literal["target", "angles"] = Field(..., description="Gaze control mode: 'target' or 'angles'")
+    mode: Literal["target", "angles"] = Field(
+        ..., description="Gaze control mode: 'target' or 'angles'"
+    )
 
     # Target mode parameters
-    target_x: float | None = Field(None, ge=-5.0, le=5.0, description="Target X in meters (for target mode)")
-    target_y: float | None = Field(None, ge=-5.0, le=5.0, description="Target Y in meters (for target mode)")
-    target_z: float | None = Field(None, ge=-2.0, le=3.0, description="Target Z in meters (for target mode)")
+    target_x: float | None = Field(
+        None, ge=-5.0, le=5.0, description="Target X in meters (for target mode)"
+    )
+    target_y: float | None = Field(
+        None, ge=-5.0, le=5.0, description="Target Y in meters (for target mode)"
+    )
+    target_z: float | None = Field(
+        None, ge=-2.0, le=3.0, description="Target Z in meters (for target mode)"
+    )
 
     # Angles mode parameters
-    pan: float | None = Field(None, ge=-90.0, le=90.0, description="Pan angle in degrees (for angles mode)")
-    tilt: float | None = Field(None, ge=-45.0, le=45.0, description="Tilt angle in degrees (for angles mode)")
+    pan: float | None = Field(
+        None, ge=-90.0, le=90.0, description="Pan angle in degrees (for angles mode)"
+    )
+    tilt: float | None = Field(
+        None, ge=-45.0, le=45.0, description="Tilt angle in degrees (for angles mode)"
+    )
 
-    timeout_ms: int = Field(2000, ge=100, le=10000, description="Operation timeout in milliseconds")
+    timeout_ms: int = Field(
+        2000, ge=100, le=10000, description="Operation timeout in milliseconds"
+    )
 
     @model_validator(mode="after")
     def validate_mode_params(self) -> "SetGazeArgs":
         """Validate that required parameters are provided based on mode."""
         if self.mode == "target":
             if self.target_x is None or self.target_y is None or self.target_z is None:
-                raise ValueError("target_x, target_y, and target_z are required when mode='target'")
+                raise ValueError(
+                    "target_x, target_y, and target_z are required when mode='target'"
+                )
         elif self.mode == "angles":
             if self.pan is None or self.tilt is None:
                 raise ValueError("pan and tilt are required when mode='angles'")
@@ -78,11 +109,21 @@ class PlaySoundArgs(BaseModel):
     Supports both named sound effects and custom audio files.
     """
 
-    sound_type: Literal["effect", "file", "speech"] = Field(..., description="Type of sound to play")
-    sound_id: str = Field(..., min_length=1, max_length=200, description="Sound identifier or file path")
-    volume: float = Field(0.7, ge=0.0, le=1.0, description="Playback volume (0.0 to 1.0)")
-    blocking: bool = Field(False, description="Whether to wait for playback to complete")
-    timeout_ms: int = Field(10000, ge=100, le=60000, description="Operation timeout in milliseconds")
+    sound_type: Literal["effect", "file", "speech"] = Field(
+        ..., description="Type of sound to play"
+    )
+    sound_id: str = Field(
+        ..., min_length=1, max_length=200, description="Sound identifier or file path"
+    )
+    volume: float = Field(
+        0.7, ge=0.0, le=1.0, description="Playback volume (0.0 to 1.0)"
+    )
+    blocking: bool = Field(
+        False, description="Whether to wait for playback to complete"
+    )
+    timeout_ms: int = Field(
+        10000, ge=100, le=60000, description="Operation timeout in milliseconds"
+    )
 
     @field_validator("sound_id")
     @classmethod
@@ -100,10 +141,18 @@ class CaptureFrameArgs(BaseModel):
     Captures image from specified camera and returns reference ID.
     """
 
-    camera: Literal["front", "wrist", "overhead"] = Field("front", description="Camera to capture from")
-    resolution: Literal["low", "medium", "high"] = Field("medium", description="Capture resolution")
-    include_metadata: bool = Field(True, description="Include timestamp and camera parameters")
-    timeout_ms: int = Field(2000, ge=100, le=10000, description="Operation timeout in milliseconds")
+    camera: Literal["front", "wrist", "overhead"] = Field(
+        "front", description="Camera to capture from"
+    )
+    resolution: Literal["low", "medium", "high"] = Field(
+        "medium", description="Capture resolution"
+    )
+    include_metadata: bool = Field(
+        True, description="Include timestamp and camera parameters"
+    )
+    timeout_ms: int = Field(
+        2000, ge=100, le=10000, description="Operation timeout in milliseconds"
+    )
 
 
 # ============================================================================
@@ -131,7 +180,9 @@ class ToolCallResult(BaseModel):
     call_id: str = Field(..., description="Tool call ID this result corresponds to")
     success: bool = Field(..., description="Whether the tool executed successfully")
     output: str = Field(..., description="Tool output or error message")
-    execution_time_ms: int | None = Field(None, description="Actual execution time in milliseconds")
+    execution_time_ms: int | None = Field(
+        None, description="Actual execution time in milliseconds"
+    )
 
 
 # ============================================================================
@@ -370,7 +421,9 @@ def get_tool_schemas() -> list[dict[str, Any]]:
     return ACTUATOR_TOOLS.copy()
 
 
-def register_tools_in_prompt(base_prompt: str, include_tools: list[str] | None = None) -> str:
+def register_tools_in_prompt(
+    base_prompt: str, include_tools: list[str] | None = None
+) -> str:
     """Add tool descriptions to a system prompt.
 
     Args:
@@ -402,7 +455,9 @@ def register_tools_in_prompt(base_prompt: str, include_tools: list[str] | None =
             required = tool["parameters"].get("required", [])
 
             for param_name, param_spec in props.items():
-                required_marker = " (required)" if param_name in required else " (optional)"
+                required_marker = (
+                    " (required)" if param_name in required else " (optional)"
+                )
                 param_desc = param_spec.get("description", "")
                 tool_docs += f"- `{param_name}`: {param_desc}{required_marker}\n"
 
@@ -437,6 +492,7 @@ def validate_and_parse_tool_call(
 
     # Parse JSON and validate against the model
     import json
+
     try:
         args_dict = json.loads(arguments_json)
     except json.JSONDecodeError as e:

@@ -2,11 +2,9 @@
 
 import asyncio
 import base64
-import json
 import logging
 
 import numpy as np
-from pydantic import ValidationError
 
 import unmute.openai_realtime_api_events as ora
 from unmute import metrics as mt
@@ -69,14 +67,18 @@ class EventDispatcher:
             await self.emit_queue.put(ack)
             # Record state snapshot after item creation
             if self.handler.recorder is not None:
-                await self.handler.recorder.add_state_snapshot(self.handler.session_state)
+                await self.handler.recorder.add_state_snapshot(
+                    self.handler.session_state
+                )
 
         elif isinstance(message, ora.ConversationItemDelete):
             ack = await self.handler.handle_item_delete(message.item_id)
             await self.emit_queue.put(ack)
             # Record state snapshot after item deletion
             if self.handler.recorder is not None:
-                await self.handler.recorder.add_state_snapshot(self.handler.session_state)
+                await self.handler.recorder.add_state_snapshot(
+                    self.handler.session_state
+                )
 
         elif isinstance(message, ora.ConversationItemRetrieve):
             ack = self.handler.handle_item_retrieve(message.item_id)
@@ -112,9 +114,7 @@ class EventDispatcher:
         elif isinstance(message, ora.InputAudioBufferCommit):
             item_id, prev_id = await self.handler.commit_audio_buffer()
             await self.emit_queue.put(
-                ora.InputAudioBufferCommitted(
-                    item_id=item_id, previous_item_id=prev_id
-                )
+                ora.InputAudioBufferCommitted(item_id=item_id, previous_item_id=prev_id)
             )
 
         elif isinstance(message, ora.InputAudioBufferClear):
@@ -135,7 +135,9 @@ class EventDispatcher:
         # frame metadata tracking (timestamps, sequences, latency)
 
         # Check for overflow before appending
-        buffer_was_full = self.audio_buffer.total_samples >= self.audio_buffer._max_buffer_samples
+        buffer_was_full = (
+            self.audio_buffer.total_samples >= self.audio_buffer._max_buffer_samples
+        )
 
         pcm = await self.audio_buffer.append_opus_async(opus_bytes)
 
@@ -173,9 +175,7 @@ class EventDispatcher:
                 # Send error for unsupported extensions
                 error_event = create_extension_error(rejected)
                 await self.emit_queue.put(error_event)
-                logger.warning(
-                    f"Client requested unsupported extensions: {rejected}"
-                )
+                logger.warning(f"Client requested unsupported extensions: {rejected}")
             # Update negotiated session with accepted extensions
             self.negotiated_session.extensions = accepted
             logger.info(f"Negotiated extensions: {accepted}")

@@ -65,9 +65,10 @@ class Error(BaseEvent[Literal["error"]]):
 
 class Session(BaseModel):
     """Session configuration object."""
+
     id: str | None = None
     object: Literal["realtime.session"] = "realtime.session"
-    type: Literal['realtime', 'transcription'] = 'realtime'
+    type: Literal["realtime", "transcription"] = "realtime"
     model: str | None = None
     modalities: list[str] | None = None
     # The "Instructions" object is an Unmute extension
@@ -87,16 +88,19 @@ class Session(BaseModel):
 
 class SessionUpdate(BaseEvent[Literal["session.update"]]):
     """Update session configuration (client event)."""
+
     session: Session | dict[str, Any]
 
 
 class SessionCreated(BaseEvent[Literal["session.created"]]):
     """First event after connection is established (server event)."""
+
     session: Session
 
 
 class SessionUpdated(BaseEvent[Literal["session.updated"]]):
     """Session configuration was updated (server event)."""
+
     session: Session
 
 
@@ -106,11 +110,13 @@ class InputAudioBufferAppend(BaseEvent[Literal["input_audio_buffer.append"]]):
 
 class InputAudioBufferCommit(BaseEvent[Literal["input_audio_buffer.commit"]]):
     """Commit the input audio buffer to create a user message."""
+
     pass
 
 
 class InputAudioBufferClear(BaseEvent[Literal["input_audio_buffer.clear"]]):
     """Clear the input audio buffer."""
+
     pass
 
 
@@ -125,16 +131,16 @@ class UnmuteInputAudioBufferAppendAnonymized(
     number_of_samples: int
 
 
-class InputAudioBufferCommitted(
-    BaseEvent[Literal["input_audio_buffer.committed"]]
-):
+class InputAudioBufferCommitted(BaseEvent[Literal["input_audio_buffer.committed"]]):
     """Audio buffer was committed (server event)."""
+
     item_id: str
     previous_item_id: str | None = None
 
 
 class InputAudioBufferCleared(BaseEvent[Literal["input_audio_buffer.cleared"]]):
     """Input buffer was cleared (server event)."""
+
     pass
 
 
@@ -149,6 +155,7 @@ class InputAudioBufferSpeechStarted(
     the VAD for both events we might get a start event without a stop event.
     For VAD interruptions, see `UnmuteInterruptedByVAD`.
     """
+
     item_id: str | None = None
     audio_start_ms: int | None = None
 
@@ -157,14 +164,14 @@ class InputAudioBufferSpeechStopped(
     BaseEvent[Literal["input_audio_buffer.speech_stopped"]]
 ):
     """A pause was detected by the VAD."""
+
     item_id: str | None = None
     audio_end_ms: int | None = None
 
 
-
-
 class UsageStats(BaseModel):
     """Token usage statistics."""
+
     total_tokens: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -172,18 +179,21 @@ class UsageStats(BaseModel):
 
 class ContentPart(BaseModel):
     """Base content part for conversation items and responses."""
+
     type: str
     # Subclasses will define specific fields
 
 
 class TextContentPart(ContentPart):
     """Text content part."""
+
     type: Literal["text"] = "text"
     text: str
 
 
 class AudioContentPart(ContentPart):
     """Audio content part."""
+
     type: Literal["audio"] = "audio"
     audio: str | None = None  # Base64-encoded audio
     transcript: str | None = None
@@ -191,12 +201,14 @@ class AudioContentPart(ContentPart):
 
 class InputTextContentPart(ContentPart):
     """User text input content part."""
+
     type: Literal["input_text"] = "input_text"
     text: str
 
 
 class InputAudioContentPart(ContentPart):
     """User audio input content part."""
+
     type: Literal["input_audio"] = "input_audio"
     audio: str | None = None  # Base64-encoded audio
     transcript: str | None = None
@@ -204,6 +216,7 @@ class InputAudioContentPart(ContentPart):
 
 class ImageContentPart(ContentPart):
     """Image content part for assistant responses."""
+
     type: Literal["image"] = "image"
     image_url: dict[str, str] | None = None  # {"url": "data:image/..."}
     detail: Literal["auto", "low", "high"] | None = None
@@ -211,6 +224,7 @@ class ImageContentPart(ContentPart):
 
 class InputImageContentPart(ContentPart):
     """User image input content part."""
+
     type: Literal["input_image"] = "input_image"
     image_url: dict[str, str] | None = None  # {"url": "data:image/..."}
     detail: Literal["auto", "low", "high"] | None = None
@@ -218,6 +232,7 @@ class InputImageContentPart(ContentPart):
 
 class MetadataContentPart(ContentPart):
     """Metadata content part for sensor readings and structured context."""
+
     type: Literal["metadata"] = "metadata"
     key: str
     value: Any
@@ -226,6 +241,7 @@ class MetadataContentPart(ContentPart):
 
 class FunctionCall(BaseModel):
     """Function call details."""
+
     call_id: str
     name: str
     arguments: str  # JSON string
@@ -233,12 +249,14 @@ class FunctionCall(BaseModel):
 
 class FunctionCallOutput(BaseModel):
     """Function call output details."""
+
     call_id: str
     output: str
 
 
 class Item(BaseModel):
     """Conversation or response item."""
+
     id: str
     object: Literal["realtime.item"] = "realtime.item"
     type: Literal["message", "function_call", "function_call_output"]
@@ -253,6 +271,7 @@ class Item(BaseModel):
 
 class Response(BaseModel):
     """Response object."""
+
     id: str | None = None
     object: Literal["realtime.response"] = "realtime.response"
     # We currently only use in_progress
@@ -267,11 +286,13 @@ class Response(BaseModel):
 
 class ResponseCreate(BaseEvent[Literal["response.create"]]):
     """Instruct the server to create a response via inference."""
+
     response: dict[str, Any] | None = None  # Optional configuration
 
 
 class ResponseCancel(BaseEvent[Literal["response.cancel"]]):
     """Cancel an in-progress response."""
+
     pass
 
 
@@ -281,11 +302,13 @@ class ResponseCreated(BaseEvent[Literal["response.created"]]):
 
 class ResponseDone(BaseEvent[Literal["response.done"]]):
     """Final response event with complete information."""
+
     response: Response
 
 
 class ResponseOutputItemAdded(BaseEvent[Literal["response.output_item.added"]]):
     """New output item was added during response generation (server event)."""
+
     response_id: str
     output_index: int
     item: Item
@@ -293,6 +316,7 @@ class ResponseOutputItemAdded(BaseEvent[Literal["response.output_item.added"]]):
 
 class ResponseOutputItemDone(BaseEvent[Literal["response.output_item.done"]]):
     """Output item finished streaming (server event)."""
+
     response_id: str
     output_index: int
     item: Item
@@ -300,6 +324,7 @@ class ResponseOutputItemDone(BaseEvent[Literal["response.output_item.done"]]):
 
 class ResponseContentPartAdded(BaseEvent[Literal["response.content_part.added"]]):
     """New content part was added (server event)."""
+
     response_id: str
     item_id: str
     output_index: int
@@ -309,6 +334,7 @@ class ResponseContentPartAdded(BaseEvent[Literal["response.content_part.added"]]
 
 class ResponseContentPartDone(BaseEvent[Literal["response.content_part.done"]]):
     """Content part finished (server event)."""
+
     response_id: str
     item_id: str
     output_index: int
@@ -318,6 +344,7 @@ class ResponseContentPartDone(BaseEvent[Literal["response.content_part.done"]]):
 
 class ResponseTextDelta(BaseEvent[Literal["response.output_text.delta"]]):
     """Incremental text response chunk (server event)."""
+
     delta: str
     response_id: str | None = None
     item_id: str | None = None
@@ -327,6 +354,7 @@ class ResponseTextDelta(BaseEvent[Literal["response.output_text.delta"]]):
 
 class ResponseTextDone(BaseEvent[Literal["response.output_text.done"]]):
     """Final text response (server event)."""
+
     text: str
     response_id: str | None = None
     item_id: str | None = None
@@ -338,6 +366,7 @@ class ResponseAudioTranscriptDelta(
     BaseEvent[Literal["response.output_audio_transcript.delta"]]
 ):
     """Incremental audio transcript chunk (server event)."""
+
     delta: str
     response_id: str | None = None
     item_id: str | None = None
@@ -349,6 +378,7 @@ class ResponseAudioTranscriptDone(
     BaseEvent[Literal["response.output_audio_transcript.done"]]
 ):
     """Final audio transcript (server event)."""
+
     transcript: str
     response_id: str | None = None
     item_id: str | None = None
@@ -358,6 +388,7 @@ class ResponseAudioTranscriptDone(
 
 class ResponseAudioDelta(BaseEvent[Literal["response.output_audio.delta"]]):
     """Incremental audio response chunk (server event)."""
+
     delta: str  # Base64-encoded Opus audio data
     response_id: str | None = None
     item_id: str | None = None
@@ -367,6 +398,7 @@ class ResponseAudioDelta(BaseEvent[Literal["response.output_audio.delta"]]):
 
 class ResponseAudioDone(BaseEvent[Literal["response.output_audio.done"]]):
     """Audio response finished (server event)."""
+
     response_id: str | None = None
     item_id: str | None = None
     output_index: int | None = None
@@ -383,6 +415,7 @@ class ResponseFunctionCallArgumentsDelta(
     BaseEvent[Literal["response.function_call_arguments.delta"]]
 ):
     """Incremental function call arguments chunk (server event)."""
+
     response_id: str
     item_id: str
     output_index: int
@@ -394,6 +427,7 @@ class ResponseFunctionCallArgumentsDone(
     BaseEvent[Literal["response.function_call_arguments.done"]]
 ):
     """Final function call arguments (server event)."""
+
     response_id: str
     item_id: str
     output_index: int
@@ -403,6 +437,7 @@ class ResponseFunctionCallArgumentsDone(
 
 class RateLimit(BaseModel):
     """Rate limit information."""
+
     name: str
     limit: int
     remaining: int
@@ -411,17 +446,20 @@ class RateLimit(BaseModel):
 
 class RateLimitsUpdated(BaseEvent[Literal["rate_limits.updated"]]):
     """Rate limits were updated (server event)."""
+
     rate_limits: list[RateLimit]
 
 
 class Conversation(BaseModel):
     """Conversation object."""
+
     id: str
     object: Literal["realtime.conversation"] = "realtime.conversation"
 
 
 class ConversationCreated(BaseEvent[Literal["conversation.created"]]):
     """Conversation was created (server event)."""
+
     conversation: Conversation
 
 
@@ -429,6 +467,7 @@ class ConversationItemInputAudioTranscriptionDelta(
     BaseEvent[Literal["conversation.item.input_audio_transcription.delta"]]
 ):
     """Incremental transcription of user audio (server event)."""
+
     item_id: str
     content_index: int
     delta: str
@@ -439,6 +478,7 @@ class ConversationItemInputAudioTranscriptionCompleted(
     BaseEvent[Literal["conversation.item.input_audio_transcription.completed"]]
 ):
     """Final transcription of user audio (server event)."""
+
     item_id: str
     content_index: int
     transcript: str
@@ -449,6 +489,7 @@ class ConversationItemInputAudioTranscriptionFailed(
     BaseEvent[Literal["conversation.item.input_audio_transcription.failed"]]
 ):
     """Transcription failed (server event)."""
+
     item_id: str
     content_index: int
     error: ErrorDetails
@@ -476,41 +517,49 @@ class UnmuteInterruptedByVAD(BaseEvent[Literal["unmute.interrupted_by_vad"]]):
 
 # Server events (from OpenAI to client)
 
+
 # Conversation item events
 class ConversationItemCreate(BaseEvent[Literal["conversation.item.create"]]):
     """Add a new item to the conversation (client event)."""
+
     item: dict
     previous_item_id: str | None = None
 
 
 class ConversationItemCreated(BaseEvent[Literal["conversation.item.created"]]):
     """Item was added to conversation (server event)."""
+
     item: Item
     previous_item_id: str | None = None
 
 
 class ConversationItemDelete(BaseEvent[Literal["conversation.item.delete"]]):
     """Remove an item from conversation history (client event)."""
+
     item_id: str
 
 
 class ConversationItemDeleted(BaseEvent[Literal["conversation.item.deleted"]]):
     """Item was removed from conversation (server event)."""
+
     item_id: str
 
 
 class ConversationItemRetrieve(BaseEvent[Literal["conversation.item.retrieve"]]):
     """Retrieve a specific item from conversation history (client event)."""
+
     item_id: str
 
 
 class ConversationItemRetrieved(BaseEvent[Literal["conversation.item.retrieved"]]):
     """Item retrieved from conversation (server event)."""
+
     item: Item
 
 
 class ConversationItemTruncate(BaseEvent[Literal["conversation.item.truncate"]]):
     """Truncate assistant message audio mid-stream (client event)."""
+
     item_id: str
     content_index: int
     audio_end_ms: int
@@ -518,10 +567,10 @@ class ConversationItemTruncate(BaseEvent[Literal["conversation.item.truncate"]])
 
 class ConversationItemTruncated(BaseEvent[Literal["conversation.item.truncated"]]):
     """Item was truncated (server event)."""
+
     item_id: str
     content_index: int
     audio_end_ms: int
-
 
 
 ServerEvent = Union[

@@ -53,6 +53,7 @@ class OpusDecoder(Protocol):
         """Decode Opus bytes to PCM samples."""
         ...
 
+
 logger = getLogger(__name__)
 
 # Maximum buffer size in samples before overflow protection kicks in
@@ -65,6 +66,7 @@ MAX_SEQUENCE_GAP = 5
 
 class BufferState(Enum):
     """State of the audio buffer."""
+
     ACCUMULATING = auto()
     COMMITTED = auto()
     CLEARED = auto()
@@ -212,7 +214,9 @@ class RealtimeAudioBuffer:
         self._on_frame_recorded = on_frame_recorded
 
         # Opus decoder - use provided or create default
-        self._opus_reader: OpusDecoder = opus_decoder or sphn.OpusStreamReader(sample_rate)
+        self._opus_reader: OpusDecoder = opus_decoder or sphn.OpusStreamReader(
+            sample_rate
+        )
         self._wait_for_first_opus = True
 
         # Frame storage
@@ -285,9 +289,7 @@ class RealtimeAudioBuffer:
             - Overflow protection triggered
         """
         if self._state != BufferState.ACCUMULATING:
-            logger.warning(
-                f"Attempted to append to buffer in state {self._state.name}"
-            )
+            logger.warning(f"Attempted to append to buffer in state {self._state.name}")
             return None
 
         # Wait for first valid Opus packet
@@ -358,9 +360,7 @@ class RealtimeAudioBuffer:
             pcm = await asyncio.to_thread(self._opus_reader.append_bytes, opus_bytes)
 
         if self._state != BufferState.ACCUMULATING:
-            logger.warning(
-                f"Attempted to append to buffer in state {self._state.name}"
-            )
+            logger.warning(f"Attempted to append to buffer in state {self._state.name}")
             return None
 
         # Wait for first valid Opus packet
@@ -371,9 +371,7 @@ class RealtimeAudioBuffer:
                 return None
 
         if self._total_samples >= self._max_buffer_samples:
-            logger.warning(
-                f"Buffer overflow protection: {self._total_samples} samples"
-            )
+            logger.warning(f"Buffer overflow protection: {self._total_samples} samples")
             return None
 
         if pcm.size == 0:

@@ -140,7 +140,9 @@ class VADHandler:
     def determine_pause(
         self,
         stt: SpeechToText,
-        conversation_state: Literal["waiting_for_user", "user_speaking", "bot_speaking"],
+        conversation_state: Literal[
+            "waiting_for_user", "user_speaking", "bot_speaking"
+        ],
         debug_dict: dict,
     ) -> bool:
         """Determine if a pause has been detected.
@@ -228,7 +230,9 @@ class VADHandler:
 
     def should_interrupt_by_vad(
         self,
-        conversation_state: Literal["waiting_for_user", "user_speaking", "bot_speaking"],
+        conversation_state: Literal[
+            "waiting_for_user", "user_speaking", "bot_speaking"
+        ],
         pause_score: float,
         audio_time: float,
     ) -> bool:

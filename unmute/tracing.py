@@ -268,6 +268,7 @@ async def profile_task_group_overhead(num_tasks: int = 100) -> float:
     Returns:
         Average overhead per task in milliseconds
     """
+
     async def minimal_task():
         pass
 

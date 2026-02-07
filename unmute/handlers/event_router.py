@@ -1,11 +1,9 @@
 """Event routing and lifecycle management for UnmuteHandler."""
 
 import asyncio
-import time
 from logging import getLogger
 from typing import Any
 
-import unmute.openai_realtime_api_events as ora
 from unmute import metrics as mt
 from unmute.exceptions import make_ora_error
 from unmute.session_state import SessionState
