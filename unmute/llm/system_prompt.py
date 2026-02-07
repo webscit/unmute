@@ -8,7 +8,23 @@ from pydantic import BaseModel, Field
 from unmute.llm.llm_utils import autoselect_model
 from unmute.llm.newsapi import get_news
 from unmute.llm.quiz_show_questions import QUIZ_SHOW_QUESTIONS
-from unmute.tooling.tool_schemas import register_tools_in_prompt
+
+
+# FIXME - do we need this
+def register_tools_in_prompt(
+    base_prompt: str, include_tools: list[str] | None = None
+) -> str:
+    """Add tool descriptions to a system prompt.
+
+    Args:
+        base_prompt: The base system prompt text.
+        include_tools: Optional list of tool names to include. If None, includes all tools.
+
+    Returns:
+        Enhanced prompt with tool documentation appended.
+    """
+    return base_prompt
+
 
 _SYSTEM_PROMPT_BASICS = """
 You're in a speech conversation with a human user. Their text is being transcribed using

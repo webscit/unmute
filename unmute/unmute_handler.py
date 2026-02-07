@@ -43,7 +43,6 @@ from unmute.service_discovery import find_instance
 from unmute.session_state import SessionState
 from unmute.stt.speech_to_text import SpeechToText, STTMarkerMessage
 from unmute.timer import Stopwatch
-from unmute.tooling.tool_schemas import get_tool_schemas, validate_and_parse_tool_call
 from unmute.tracing import (
     LLM_WORD_GENERATION_DURATION,
     TTS_WORD_PROCESSING_DURATION,
@@ -879,24 +878,12 @@ class UnmuteHandler(AsyncStreamHandler):
         if voice:
             self.tts_voice = voice
 
-        # Configure tools - validate tool schemas if provided
+        # Configure tools
         if tools is not None:
-            # Validate that provided tools match known schemas
-            known_tool_schemas = {t["name"]: t for t in get_tool_schemas()}
-            validated_tools = []
-
-            for tool_config in tools:
-                tool_name = tool_config.get("name")
-                if tool_name not in known_tool_schemas:
-                    logger.warning(
-                        f"Unknown tool '{tool_name}' in session config, ignoring"
-                    )
-                    continue
-                # Use canonical schema definition
-                validated_tools.append(known_tool_schemas[tool_name])
-
-            self.session_state.session.tools = validated_tools
-            logger.info(f"Configured {len(validated_tools)} tools for session")
+            # FIXME should we validate the tools?
+            _tools = [c for c in tools]
+            self.session_state.session.tools = _tools
+            logger.info(f"Configured {len(_tools)} tools for session")
 
         if tool_choice is not None:
             self.session_state.session.tool_choice = tool_choice
