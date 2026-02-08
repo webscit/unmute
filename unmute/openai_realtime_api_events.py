@@ -29,6 +29,52 @@ def random_id(prefix: str) -> str:
     return prefix + "_" + "".join(random.choices(alphabet, k=n_characters))
 
 
+def normalize_session_config(session_dict: dict[str, Any]) -> dict[str, Any]:
+    """Normalize nested audio config format to flat fields.
+
+    The OpenAI Realtime API SDK sends session config with a nested `audio` object:
+        audio.input.format.type → input_audio_format
+        audio.output.format.type → output_audio_format
+        audio.output.voice → voice
+        audio.input.turn_detection → turn_detection
+        audio.input.transcription → input_audio_transcription
+
+    This function extracts those nested values into the flat format used internally.
+    """
+    audio = session_dict.get("audio")
+    if audio is None:
+        return session_dict
+
+    result = {k: v for k, v in session_dict.items() if k != "audio"}
+
+    audio_input = audio.get("input", {})
+    audio_output = audio.get("output", {})
+
+    # audio.input.format.type → input_audio_format
+    input_format = audio_input.get("format", {})
+    if isinstance(input_format, dict) and "type" in input_format:
+        result.setdefault("input_audio_format", input_format["type"])
+
+    # audio.output.format.type → output_audio_format
+    output_format = audio_output.get("format", {})
+    if isinstance(output_format, dict) and "type" in output_format:
+        result.setdefault("output_audio_format", output_format["type"])
+
+    # audio.output.voice → voice
+    if "voice" in audio_output:
+        result.setdefault("voice", audio_output["voice"])
+
+    # audio.input.turn_detection → turn_detection
+    if "turn_detection" in audio_input:
+        result.setdefault("turn_detection", audio_input["turn_detection"])
+
+    # audio.input.transcription → input_audio_transcription
+    if "transcription" in audio_input:
+        result.setdefault("input_audio_transcription", audio_input["transcription"])
+
+    return result
+
+
 class BaseEvent(BaseModel, Generic[T]):
     type: T = None  # type: ignore - will be set by validator below
     event_id: str = Field(default_factory=lambda: random_id("event"))
@@ -527,7 +573,30 @@ class ConversationItemCreate(BaseEvent[Literal["conversation.item.create"]]):
 
 
 class ConversationItemCreated(BaseEvent[Literal["conversation.item.created"]]):
-    """Item was added to conversation (server event)."""
+    """Item was added to conversation (server event).
+
+    Deprecated: Use ConversationItemAdded for OpenAI Realtime API compatibility.
+    """
+
+    item: Item
+    previous_item_id: str | None = None
+
+
+class ConversationItemAdded(BaseEvent[Literal["conversation.item.added"]]):
+    """Item was added to conversation (server event).
+
+    This matches the OpenAI Realtime API event name.
+    """
+
+    item: Item
+    previous_item_id: str | None = None
+
+
+class ConversationItemDone(BaseEvent[Literal["conversation.item.done"]]):
+    """Item processing is complete (server event).
+
+    Emitted when a conversation item has finished being processed.
+    """
 
     item: Item
     previous_item_id: str | None = None
@@ -582,6 +651,8 @@ ServerEvent = Union[
     # Conversation events
     ConversationCreated,
     ConversationItemCreated,
+    ConversationItemAdded,
+    ConversationItemDone,
     ConversationItemDeleted,
     ConversationItemRetrieved,
     ConversationItemTruncated,

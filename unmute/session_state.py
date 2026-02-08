@@ -124,15 +124,25 @@ class SessionState:
         role: str | None = None,
         content: list[dict[str, Any]] | None = None,
         previous_item_id: str | None = None,
+        item_id: str | None = None,
+        call_id: str | None = None,
+        name: str | None = None,
+        arguments: str | None = None,
+        output: str | None = None,
     ) -> ora.Item:
         """Create a new conversation item and add to tracking."""
-        item_id = ora.random_id("item")
+        if item_id is None:
+            item_id = ora.random_id("item")
         item = ora.Item(
             id=item_id,
             type=item_type,  # type: ignore[arg-type]
             role=role,  # type: ignore[arg-type]
             content=content,
             status="completed",
+            call_id=call_id,
+            name=name,
+            arguments=arguments,
+            output=output,
         )
 
         # Insert at correct position

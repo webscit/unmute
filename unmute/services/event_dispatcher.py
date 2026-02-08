@@ -65,6 +65,15 @@ class EventDispatcher:
         elif isinstance(message, ora.ConversationItemCreate):
             _item, ack = await self.handler.handle_item_create(message)
             await self.emit_queue.put(ack)
+            # Emit ConversationItemDone for items that are immediately complete
+            # (function_call_output and user message items)
+            if _item.status == "completed":
+                await self.emit_queue.put(
+                    ora.ConversationItemDone(
+                        item=_item,
+                        previous_item_id=ack.previous_item_id,
+                    )
+                )
             # Record state snapshot after item creation
             if self.handler.recorder is not None:
                 await self.handler.recorder.add_state_snapshot(
@@ -116,6 +125,19 @@ class EventDispatcher:
             await self.emit_queue.put(
                 ora.InputAudioBufferCommitted(item_id=item_id, previous_item_id=prev_id)
             )
+            # Emit ConversationItemAdded + ConversationItemDone for the user audio item
+            committed_item = self.handler.session_state.get_item(item_id)
+            if committed_item is not None:
+                await self.emit_queue.put(
+                    ora.ConversationItemAdded(
+                        item=committed_item, previous_item_id=prev_id
+                    )
+                )
+                await self.emit_queue.put(
+                    ora.ConversationItemDone(
+                        item=committed_item, previous_item_id=prev_id
+                    )
+                )
 
         elif isinstance(message, ora.InputAudioBufferClear):
             await self.handler.clear_audio_buffer()
@@ -167,6 +189,10 @@ class EventDispatcher:
             else message.session.model_dump()
         )
 
+        # Normalize nested audio config
+        # (e.g. audio.input.format.type → input_audio_format)
+        session_dict = ora.normalize_session_config(session_dict)
+
         # Check for requested extensions in the session config
         requested_extensions = session_dict.get("unmute_extensions")
         if requested_extensions:
@@ -181,16 +207,15 @@ class EventDispatcher:
             logger.info(f"Negotiated extensions: {accepted}")
 
         # Update negotiated session with other config
-        self.negotiated_session.update_from_session(message.session)
+        self.negotiated_session.update_from_session(session_dict)
 
-        await self.handler.update_session(message.session)
+        await self.handler.update_session(session_dict)
 
-        # Convert session to Session object if it's a dict for the response
-        session_for_response = (
-            ora.Session(**message.session)
-            if isinstance(message.session, dict)
-            else message.session
-        )
+        # Convert session to Session object for the response
+        # Filter out keys not in Session model to avoid validation errors
+        session_fields = set(ora.Session.model_fields.keys())
+        filtered_dict = {k: v for k, v in session_dict.items() if k in session_fields}
+        session_for_response = ora.Session(**filtered_dict)
         await self.emit_queue.put(ora.SessionUpdated(session=session_for_response))
 
         # Record state snapshot after session update

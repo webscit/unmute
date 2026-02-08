@@ -1,6 +1,7 @@
 import os
 import re
 from copy import deepcopy
+from dataclasses import dataclass
 from functools import cache
 from typing import Any, AsyncIterator, Protocol, cast
 
@@ -15,25 +16,69 @@ INTERRUPTION_CHAR = "—"  # em-dash
 USER_SILENCE_MARKER = "..."
 
 
+@dataclass
+class LLMTextDelta:
+    """A text content delta from the LLM."""
+
+    text: str
+
+
+@dataclass
+class LLMToolCallDelta:
+    """A tool call delta from the LLM."""
+
+    index: int
+    tool_call_id: str | None = None
+    function_name: str | None = None
+    arguments_delta: str = ""
+
+
+LLMDelta = LLMTextDelta | LLMToolCallDelta
+
+
 def preprocess_messages_for_llm(
-    chat_history: list[dict[str, str]],
-) -> list[dict[str, str]]:
-    output = []
+    chat_history: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
 
     for message in chat_history:
         message = deepcopy(message)
+        role = message.get("role", "")
+
+        # Pass through tool messages and assistant messages with tool_calls without
+        # content manipulation
+        if role == "tool":
+            output.append(message)
+            continue
+
+        if role == "assistant" and "tool_calls" in message:
+            # Strip interruption char from content if present, but preserve tool_calls
+            content = message.get("content", "")
+            if content:
+                content = content.strip().removesuffix(INTERRUPTION_CHAR)
+                message["content"] = content
+            output.append(message)
+            continue
+
+        content = message.get("content", "")
 
         # Sometimes, an interruption happens before the LLM can say anything at all.
         # In that case, we're left with a message with only INTERRUPTION_CHAR.
         # Simplify by removing.
-        if message["content"].replace(INTERRUPTION_CHAR, "") == "":
+        if content.replace(INTERRUPTION_CHAR, "") == "":
             continue
 
         # If the llm was interrupted we don't want to insert the INTERRUPTION_CHAR
         # into the context, otherwise the LLM might want to repeat it.
-        message["content"] = message["content"].strip().removesuffix(INTERRUPTION_CHAR)
+        message["content"] = content.strip().removesuffix(INTERRUPTION_CHAR)
 
-        if output and message["role"] == output[-1]["role"]:
+        # Merge consecutive messages with the same role (but not tool messages)
+        if (
+            output
+            and message["role"] == output[-1].get("role")
+            and "tool_calls" not in output[-1]
+            and output[-1].get("role") != "tool"
+        ):
             output[-1]["content"] += " " + message["content"]
         else:
             output.append(message)
@@ -41,7 +86,7 @@ def preprocess_messages_for_llm(
     def role_at(index: int) -> str | None:
         if index >= len(output):
             return None
-        return output[index]["role"]
+        return output[index].get("role")
 
     if role_at(0) == "system" and role_at(1) in [None, "assistant"]:
         # Some LLMs, like Gemma, get confused if the assistant message goes before user
@@ -49,17 +94,19 @@ def preprocess_messages_for_llm(
         output = [output[0]] + [{"role": "user", "content": "Hello."}] + output[1:]
 
     for message in chat_history:
+        content = message.get("content", "")
         if (
-            message["role"] == "user"
-            and message["content"].startswith(USER_SILENCE_MARKER)
-            and message["content"] != USER_SILENCE_MARKER
+            message.get("role") == "user"
+            and isinstance(content, str)
+            and content.startswith(USER_SILENCE_MARKER)
+            and content != USER_SILENCE_MARKER
         ):
             # This happens when the user is silent but then starts talking again after
             # the silence marker was inserted but before the LLM could respond.
             # There are special instructions in the system prompt about how to handle
             # the silence marker, so remove the marker from the message to not confuse
             # the LLM
-            message["content"] = message["content"][len(USER_SILENCE_MARKER) :]
+            message["content"] = content[len(USER_SILENCE_MARKER) :]
 
     return output
 
@@ -160,7 +207,7 @@ class VLLMStream:
         self.temperature = temperature
 
     async def chat_completion(
-        self, messages: list[dict[str, str]]
+        self, messages: list[dict[str, Any]]
     ) -> AsyncIterator[str]:
         stream = await self.client.chat.completions.create(
             model=self.model,
@@ -181,3 +228,48 @@ class VLLMStream:
                     continue
 
                 yield chunk_content
+
+    async def chat_completion_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_choice: str = "auto",
+    ) -> AsyncIterator[LLMDelta]:
+        """Stream chat completions with tool/function calling support.
+
+        Yields LLMTextDelta for text content and LLMToolCallDelta for tool calls.
+        """
+        stream = await self.client.chat.completions.create(
+            model=self.model,
+            messages=cast(Any, messages),
+            stream=True,
+            temperature=self.temperature,
+            tools=cast(Any, tools),
+            tool_choice=cast(Any, tool_choice),
+        )
+
+        async with stream:
+            async for chunk in stream:
+                choice = chunk.choices[0] if chunk.choices else None
+                if choice is None:
+                    continue
+
+                delta = choice.delta
+
+                # Yield text content
+                if delta.content:
+                    yield LLMTextDelta(text=delta.content)
+
+                # Yield tool call deltas
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        yield LLMToolCallDelta(
+                            index=tc.index,
+                            tool_call_id=tc.id,
+                            function_name=tc.function.name if tc.function else None,
+                            arguments_delta=(
+                                (tc.function.arguments or "")
+                                if tc.function
+                                else ""
+                            ),
+                        )

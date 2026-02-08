@@ -23,18 +23,27 @@ class Chatbot:
             return "waiting_for_user"
 
         last_message = self.chat_history[-1]
-        if last_message["role"] == "assistant":
+        role = last_message.get("role", "")
+
+        if role == "tool":
+            # After a tool result, we're waiting for the LLM to respond
+            return "waiting_for_user"
+        elif role == "assistant":
+            # Assistant messages with tool_calls don't produce speech
+            if "tool_calls" in last_message:
+                return "waiting_for_user"
             return "bot_speaking"
-        elif last_message["role"] == "user":
-            if last_message["content"].strip() != "":
+        elif role == "user":
+            content = last_message.get("content", "")
+            if isinstance(content, str) and content.strip() != "":
                 return "user_speaking"
             else:
                 # Or do we want "user_speaking" here?
                 return "waiting_for_user"
-        elif last_message["role"] == "system":
+        elif role == "system":
             return "waiting_for_user"
         else:
-            raise RuntimeError(f"Unknown role: {last_message['role']}")
+            raise RuntimeError(f"Unknown role: {role}")
 
     async def add_chat_message_delta(
         self,
