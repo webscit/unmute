@@ -51,6 +51,8 @@ reportUnusedImport = true # true in "strict", but make it explicit
 
 reportMissingTypeArgument = false
 
+[tool.pytest]
+addopts = ["-ra"]
 
 [tool.ruff.lint]
 select = [

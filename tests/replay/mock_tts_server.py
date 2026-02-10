@@ -87,10 +87,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
     except WebSocketDisconnect:
         logger.debug("Mock TTS client disconnected")
+    except asyncio.CancelledError:
+        ...
     except Exception as e:
         logger.debug(f"Mock TTS error: {e}")
-
-    try:
-        await websocket.close()
-    except Exception:
-        pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
