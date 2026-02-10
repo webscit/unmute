@@ -64,3 +64,83 @@ jobs:
 
       - name: Run backend unit tests
         run: uv run pytest -v
+
+  realtime-conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7.12"
+
+      - name: Run conformance tests
+        run: |
+          mkdir -p tests/realtime_harness/reports
+          uv run python -m tests.realtime_harness.runner \
+            --output tests/realtime_harness/reports/conformance_report.json
+
+      - name: Upload conformance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-report
+          path: tests/realtime_harness/reports/conformance_report.json
+          retention-days: 30
+
+  realtime-fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7.12"
+
+      - name: Run fuzz tests
+        run: |
+          mkdir -p tests/realtime_harness/reports
+          uv run python -m tests.realtime_harness.runner \
+            --fuzz \
+            --output tests/realtime_harness/reports/fuzz_report.json
+
+      - name: Upload fuzz report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-report
+          path: tests/realtime_harness/reports/fuzz_report.json
+          retention-days: 30
+
+  realtime-benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7.12"
+
+      - name: Run latency benchmarks
+        run: |
+          mkdir -p tests/realtime_harness/reports
+          uv run python -m tests.realtime_harness.runner \
+            --benchmark \
+            --ttft-threshold 1000 \
+            --stt-threshold 300 \
+            --tool-rtt-threshold 2000 \
+            --output tests/realtime_harness/reports/benchmark_report.json
+
+      - name: Upload benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: tests/realtime_harness/reports/benchmark_report.json
+          retention-days: 30

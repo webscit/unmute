@@ -126,3 +126,35 @@ VLLM_GEN_DURATION = Histogram(
 )
 
 VOICE_DONATION_SUBMISSIONS = Counter("worker_voice_donation_submissions", "")
+
+# VAD event metrics
+VAD_SPEECH_STARTED = Counter(
+    "worker_vad_speech_started", "Number of speech_started events"
+)
+VAD_SPEECH_STOPPED = Counter(
+    "worker_vad_speech_stopped", "Number of speech_stopped events"
+)
+VAD_SPEECH_DURATION = Histogram(
+    "worker_vad_speech_duration",
+    "Duration of speech segments in seconds",
+    buckets=TURN_DURATION_BINS,
+)
+
+# Error event metrics
+BUFFER_OVERFLOW_ERRORS = Counter(
+    "worker_buffer_overflow_errors", "Audio buffer overflow errors"
+)
+SILENCE_TIMEOUT_ERRORS = Counter(
+    "worker_silence_timeout_errors", "Silence timeout errors"
+)
+BACKPRESSURE_ERRORS = Counter(
+    "worker_backpressure_errors", "Backpressure threshold exceeded errors"
+)
+
+# Queue backpressure metrics
+OUTPUT_QUEUE_SIZE = Gauge(
+    "worker_output_queue_size", "Current size of handler output queue"
+)
+EMIT_QUEUE_SIZE = Gauge(
+    "worker_emit_queue_size", "Current size of WebSocket emit queue"
+)

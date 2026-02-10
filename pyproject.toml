@@ -51,6 +51,8 @@ reportUnusedImport = true # true in "strict", but make it explicit
 
 reportMissingTypeArgument = false
 
+[tool.pytest]
+addopts = ["-ra"]
 
 [tool.ruff.lint]
 select = [
@@ -80,7 +82,7 @@ dev = [
     "pytest>=8.3.5",
     "pytest-asyncio>=0.26.0",
     "pyright",
-    "ruff",
+    "ruff>=0.15.0",
     "pre-commit",
     "pyinstrument",
     "ffmpeg-normalize>=1.31.3",

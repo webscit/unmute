@@ -81,7 +81,7 @@ async def emit_loop(
     # An initial update is necessary for the model to send the conversation starter
     await websocket.send(
         ora.SessionUpdate(
-            session=ora.SessionConfig(
+            session=ora.Session(
                 instructions=SmalltalkInstructions(),
                 voice=voice,
                 allow_recording=False,  # No need to record the load test

@@ -1,13 +1,8 @@
 import asyncio
-import base64
 import json
 import logging
-from functools import cache, partial
-from typing import Annotated
+from functools import cache
 
-import numpy as np
-import requests
-import sphn
 from fastapi import (
     FastAPI,
     File,
@@ -20,16 +15,13 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.websockets import WebSocketState
-from fastrtc import AdditionalOutputs, CloseStream, audio_to_float32
 from prometheus_fastapi_instrumentator import Instrumentator
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError, computed_field
+from pydantic import ValidationError
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
-import unmute.openai_realtime_api_events as ora
 from unmute import metrics as mt
 from unmute.exceptions import (
     MissingServiceAtCapacity,
@@ -37,16 +29,9 @@ from unmute.exceptions import (
     WebSocketClosedError,
     make_ora_error,
 )
-from unmute.kyutai_constants import (
-    KYUTAI_LLM_API_KEY,
-    LLM_SERVER,
-    MAX_VOICE_FILE_SIZE_MB,
-    SAMPLE_RATE,
-    STT_SERVER,
-    TTS_SERVER,
-    VOICE_CLONING_SERVER,
-)
-from unmute.service_discovery import async_ttl_cached
+from unmute.kyutai_constants import MAX_VOICE_FILE_SIZE_MB
+from unmute.services.health_service import check_session_admission, get_health
+from unmute.services.websocket_session_manager import WebSocketSessionManager
 from unmute.timer import Stopwatch
 from unmute.tts.voice_cloning import clone_voice
 from unmute.tts.voice_donation import (
@@ -56,6 +41,10 @@ from unmute.tts.voice_donation import (
 )
 from unmute.tts.voices import VoiceList
 from unmute.unmute_handler import UnmuteHandler
+from unmute.websocket_auth import (
+    perform_handshake_validation,
+    reject_connection_with_error,
+)
 
 app = FastAPI()
 
@@ -75,10 +64,6 @@ Instrumentator().instrument(app).expose(app)
 PROFILE_ACTIVE = False
 _last_profile = None
 _current_profile = None
-
-ClientEventAdapter = TypeAdapter(
-    Annotated[ora.ClientEvent, Field(discriminator="type")]
-)
 
 # Allow CORS for local development
 CORS_ALLOW_ORIGINS = ["http://localhost", "http://localhost:3000"]
@@ -106,95 +91,39 @@ if PROFILE_ACTIVE:
             return HTMLResponse(_last_profile.output_html())  # type: ignore
 
 
-def _ws_to_http(ws_url: str) -> str:
-    """Convert a WebSocket URL to an HTTP URL."""
-    return ws_url.replace("ws://", "http://").replace("wss://", "https://")
-
-
-def _check_server_status(server_url: str, headers: dict | None = None) -> bool:
-    """Check if the server is up by sending a GET request."""
-    try:
-        response = requests.get(
-            server_url,
-            timeout=2,
-            headers=headers or {},
-        )
-        logger.info(f"Response from {server_url}: {response}")
-        return response.status_code == 200
-    except requests.exceptions.RequestException as e:
-        logger.info(f"Couldn't connect to {server_url}: {e}")
-        return False
-
-
-async def debug_running_tasks():
-    while True:
-        logger.debug(f"Running tasks: {len(asyncio.all_tasks())}")
-        for task in asyncio.all_tasks():
-            logger.debug(f"  Task: {task.get_name()} - {task.get_coro()}")
-        await asyncio.sleep(5)
-
-
-class HealthStatus(BaseModel):
-    tts_up: bool
-    stt_up: bool
-    llm_up: bool
-    voice_cloning_up: bool
-
-    @computed_field
-    @property
-    def ok(self) -> bool:
-        # Note that voice cloning is not required for the server to be healthy.
-        return self.tts_up and self.stt_up and self.llm_up
-
-
-@partial(async_ttl_cached, ttl_sec=0.5)
-async def _get_health(
-    _none: None,
-):  # dummy param _none because caching function expects a single param as cache key.
-    async with asyncio.TaskGroup() as tg:
-        tts_up = tg.create_task(
-            asyncio.to_thread(
-                _check_server_status, _ws_to_http(TTS_SERVER) + "/api/build_info"
-            )
-        )
-        stt_up = tg.create_task(
-            asyncio.to_thread(
-                _check_server_status, _ws_to_http(STT_SERVER) + "/api/build_info"
-            )
-        )
-        llm_up = tg.create_task(
-            asyncio.to_thread(
-                _check_server_status,
-                _ws_to_http(LLM_SERVER) + "/v1/models",
-                # The default vLLM server doesn't use auth, but this is needed if you
-                # use OpenAI or another LLM server.
-                headers={"Authorization": f"Bearer {KYUTAI_LLM_API_KEY}"},
-            )
-        )
-        voice_cloning_up = tg.create_task(
-            asyncio.to_thread(
-                _check_server_status,
-                _ws_to_http(VOICE_CLONING_SERVER) + "/api/build_info",
-            )
-        )
-        tts_up_res = await tts_up
-        stt_up_res = await stt_up
-        llm_up_res = await llm_up
-        voice_cloning_up_res = await voice_cloning_up
-
-    return HealthStatus(
-        tts_up=tts_up_res,
-        stt_up=stt_up_res,
-        llm_up=llm_up_res,
-        voice_cloning_up=voice_cloning_up_res,
-    )
-
-
 @app.get("/v1/health")
-async def get_health():
-    health = await _get_health(None)
+async def health_endpoint():
+    health = await get_health()
     mt.HEALTH_OK.observe(health.ok)
     return health
+
+
+@app.get("/healthz")
+async def liveness_probe():
+    """
+    Liveness probe for Kubernetes.
+    Returns 200 if the application is alive and running.
+    """
+    # Basic liveness check - just ensure the app is responding
+    return {"status": "alive"}
+
+
+@app.get("/readyz")
+async def readiness_probe():
+    """
+    Readiness probe for Kubernetes.
+    Returns 200 if the system is ready to accept new sessions.
+    Returns 503 if the system is overloaded or dependencies are unavailable.
+    """
+    can_admit, reason = await check_session_admission()
+
+    if not can_admit:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"ready": False, "reason": reason},
+        )
+
+    return {"ready": True, "reason": ""}
 
 
 @app.get("/v1/voices")
@@ -290,6 +219,25 @@ async def post_voice_donation(
 @app.websocket("/v1/realtime")
 async def websocket_route(websocket: WebSocket):
     global _last_profile, _current_profile
+
+    # Perform handshake validation before accepting
+    valid, error = await perform_handshake_validation(websocket)
+    if not valid and error is not None:
+        logger.info(f"WebSocket handshake failed: {error.error.message}")
+        await reject_connection_with_error(websocket, error)
+        return
+
+    # Check if system can admit new session based on health probes
+    can_admit, reason = await check_session_admission()
+    if not can_admit:
+        logger.warning(f"Session admission denied: {reason}")
+        error = make_ora_error(
+            type="server_overloaded",
+            message=f"Server is overloaded: {reason}. Please try again later.",
+        )
+        await reject_connection_with_error(websocket, error)
+        return
+
     mt.SESSIONS.inc()
     mt.ACTIVE_SESSIONS.inc()
     session_watch = Stopwatch()
@@ -311,12 +259,15 @@ async def websocket_route(websocket: WebSocket):
             # protocol(s) it supports and OpenAI uses "realtime" as the value. If we
             # don't set this, the client will think this is not the right endpoint and
             # will not connect.
-            await websocket.accept(subprotocol="realtime")
+            # await websocket.accept(subprotocol=REALTIME_SUBPROTOCOL)
+            await websocket.accept()
 
             handler = UnmuteHandler()
+
             async with handler:
                 await handler.start_up()
-                await _run_route(websocket, handler)
+                session_manager = WebSocketSessionManager(websocket, handler)
+                await session_manager.run()
 
         except Exception as exc:
             await _report_websocket_exception(websocket, exc)
@@ -375,210 +326,6 @@ async def _report_websocket_exception(websocket: WebSocket, exc: Exception):
             )
         except RuntimeError:
             logger.warning("Socket already closed.")
-
-
-async def _run_route(websocket: WebSocket, handler: UnmuteHandler):
-    health = await get_health()
-    if not health.ok:
-        logger.info("Health check failed, closing WebSocket connection.")
-        await websocket.close(
-            code=status.WS_1011_INTERNAL_ERROR,
-            reason=f"Server is not healthy: {health}",
-        )
-        return
-
-    emit_queue: asyncio.Queue[ora.ServerEvent] = asyncio.Queue()
-    try:
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(
-                receive_loop(websocket, handler, emit_queue), name="receive_loop()"
-            )
-            tg.create_task(
-                emit_loop(websocket, handler, emit_queue), name="emit_loop()"
-            )
-            tg.create_task(handler.quest_manager.wait(), name="quest_manager.wait()")
-            tg.create_task(debug_running_tasks(), name="debug_running_tasks()")
-    finally:
-        await handler.cleanup()
-        logger.info("websocket_route() finished")
-
-
-async def receive_loop(
-    websocket: WebSocket,
-    handler: UnmuteHandler,
-    emit_queue: asyncio.Queue[ora.ServerEvent],
-):
-    """Receive messages from the WebSocket.
-
-    Can decide to send messages via `emit_queue`.
-    """
-    opus_reader = sphn.OpusStreamReader(SAMPLE_RATE)
-    wait_for_first_opus = True
-    while True:
-        try:
-            message_raw = await websocket.receive_text()
-        except WebSocketDisconnect as e:
-            logger.info(
-                "receive_loop() stopped because WebSocket disconnected: "
-                f"{e.code=} {e.reason=}"
-            )
-            raise WebSocketClosedError() from e
-        except RuntimeError as e:
-            # This is expected when the client disconnects
-            if "WebSocket is not connected" not in str(e):
-                raise  # re-raise unexpected errors
-
-            logger.info("receive_loop() stopped because WebSocket disconnected.")
-            raise WebSocketClosedError() from e
-
-        try:
-            message: ora.ClientEvent = ClientEventAdapter.validate_json(message_raw)
-        except json.JSONDecodeError as e:
-            await emit_queue.put(
-                ora.Error(
-                    error=ora.ErrorDetails(
-                        type="invalid_request_error",
-                        message=f"Invalid JSON: {e}",
-                    )
-                )
-            )
-            continue
-        except ValidationError as e:
-            await emit_queue.put(
-                ora.Error(
-                    error=ora.ErrorDetails(
-                        type="invalid_request_error",
-                        message="Invalid message",
-                        details=json.loads(e.json()),
-                    )
-                )
-            )
-            continue
-
-        message_to_record = message
-
-        if isinstance(message, ora.InputAudioBufferAppend):
-            opus_bytes = base64.b64decode(message.audio)
-            if wait_for_first_opus:
-                # Somehow the UI is sending us potentially old messages from a previous
-                # connection on reconnect, so that we might get some old OGG packets,
-                # waiting for the bit set for first packet to feed to the decoder.
-                if opus_bytes[5] & 2:
-                    wait_for_first_opus = False
-                else:
-                    continue
-            pcm = await asyncio.to_thread(opus_reader.append_bytes, opus_bytes)
-
-            message_to_record = ora.UnmuteInputAudioBufferAppendAnonymized(
-                number_of_samples=pcm.size,
-            )
-
-            if pcm.size:
-                await handler.receive((SAMPLE_RATE, pcm[np.newaxis, :]))
-        elif isinstance(message, ora.SessionUpdate):
-            await handler.update_session(message.session)
-            await emit_queue.put(ora.SessionUpdated(session=message.session))
-
-        elif isinstance(message, ora.UnmuteAdditionalOutputs):
-            # Don't record this: it's a debugging message and can be verbose. Anything
-            # important to store should be in the other event types.
-            message_to_record = None
-
-        else:
-            logger.info("Ignoring message:", str(message)[:100])
-
-        if message_to_record is not None and handler.recorder is not None:
-            await handler.recorder.add_event("client", message_to_record)
-
-
-class EmitDebugLogger:
-    def __init__(self):
-        self.last_emitted_n = 0
-        self.last_emitted_type = ""
-
-    def on_emit(self, to_emit: ora.ServerEvent):
-        if self.last_emitted_type == to_emit.type:
-            self.last_emitted_n += 1
-        else:
-            self.last_emitted_n = 1
-            self.last_emitted_type = to_emit.type
-
-        if self.last_emitted_n == 1:
-            logger.debug(f"Emitting: {to_emit.type}")
-        else:
-            logger.debug(f"Emitting ({self.last_emitted_n}): {self.last_emitted_type}")
-
-
-async def emit_loop(
-    websocket: WebSocket,
-    handler: UnmuteHandler,
-    emit_queue: asyncio.Queue[ora.ServerEvent],
-):
-    """Send messages to the WebSocket."""
-    emit_debug_logger = EmitDebugLogger()
-
-    opus_writer = sphn.OpusStreamWriter(SAMPLE_RATE)
-
-    while True:
-        if (
-            websocket.application_state == WebSocketState.DISCONNECTED
-            or websocket.client_state == WebSocketState.DISCONNECTED
-        ):
-            logger.info("emit_loop() stopped because WebSocket disconnected")
-            raise WebSocketClosedError()
-
-        try:
-            to_emit = emit_queue.get_nowait()
-        except asyncio.QueueEmpty:
-            emitted_by_handler = await handler.emit()
-
-            if emitted_by_handler is None:
-                continue
-            elif isinstance(emitted_by_handler, AdditionalOutputs):
-                assert len(emitted_by_handler.args) == 1
-                to_emit = ora.UnmuteAdditionalOutputs(
-                    args=emitted_by_handler.args[0],
-                )
-            elif isinstance(emitted_by_handler, CloseStream):
-                # Close here explicitly so that the receive loop stops too
-                await websocket.close()
-                break
-            elif isinstance(emitted_by_handler, ora.ServerEvent):
-                to_emit = emitted_by_handler
-            else:
-                _sr, audio = emitted_by_handler
-                audio = audio_to_float32(audio)
-                opus_bytes = await asyncio.to_thread(opus_writer.append_pcm, audio)
-                # Due to buffering/chunking, Opus doesn't necessarily output something on every PCM added
-                if opus_bytes:
-                    to_emit = ora.ResponseAudioDelta(
-                        delta=base64.b64encode(opus_bytes).decode("utf-8"),
-                    )
-                else:
-                    continue
-
-        emit_debug_logger.on_emit(to_emit)
-
-        if handler.recorder is not None:
-            await handler.recorder.add_event("server", to_emit)
-
-        try:
-            await websocket.send_text(to_emit.model_dump_json())
-        except (WebSocketDisconnect, RuntimeError) as e:
-            if isinstance(e, RuntimeError):
-                if "Unexpected ASGI message 'websocket.send'" in str(e):
-                    # This is expected when the client disconnects
-                    message = f"emit_loop() stopped because WebSocket disconnected: {e}"
-                else:
-                    raise
-            else:
-                message = (
-                    "emit_loop() stopped because WebSocket disconnected: "
-                    f"{e.code=} {e.reason=}"
-                )
-
-            logger.info(message)
-            raise WebSocketClosedError() from e
 
 
 def _cors_headers_for_error(request: Request):
