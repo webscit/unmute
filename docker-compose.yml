@@ -38,10 +38,12 @@ services:
   frontend:
     image: unmute-frontend:latest
     build:
-      context: frontend/
+      context: web/
       dockerfile: hot-reloading.Dockerfile
     volumes:
-      - ./frontend/src:/app/src
+      - ./web/src:/app/src
+      - ./web/public:/app/public
+      - ./web/index.html:/app/index.html
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
