@@ -10,7 +10,6 @@ import { SessionSidebar } from "@/components/layout/SessionSidebar";
 import { ChatView } from "@/components/chat/ChatView";
 import { AudioControls } from "@/components/audio/AudioControls";
 import {
-  SettingsDialog,
   type SettingsValues,
 } from "@/components/settings/SettingsDialog";
 import type { ChatMessageRecord } from "@/lib/db/chat-db";
@@ -24,8 +23,8 @@ const DEFAULT_SETTINGS: SettingsValues = {
 function App() {
   // ---- State ----
   const [debugMode, setDebugMode] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settings, setSettings] = useState<SettingsValues>(DEFAULT_SETTINGS);
+  const [, setSettingsOpen] = useState(false);
+  const [settings, ] = useState<SettingsValues>(DEFAULT_SETTINGS);
 
   // ---- Hooks ----
   const session = useRealtimeSession();

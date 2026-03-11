@@ -1,6 +1,6 @@
 # syntax=docker.io/docker/dockerfile:1
 
-FROM node:18-alpine AS dev
+FROM node:22-alpine AS dev
 
 # Install required dependencies
 RUN apk add --no-cache libc6-compat curl
@@ -9,7 +9,7 @@ RUN apk add --no-cache libc6-compat curl
 WORKDIR /app
 
 # Install dependencies using pnpm
-COPY package.json pnpm-lock.yaml* .npmrc* ./
+COPY package.json tsconfig*.json vite.config.ts pnpm-lock.yaml* .npmrc* ./
 RUN corepack enable pnpm && pnpm i --frozen-lockfile
 
 # Expose the port the dev server runs on
