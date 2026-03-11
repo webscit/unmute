@@ -2,6 +2,8 @@ import { type ReactNode } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { MessageSquare } from "lucide-react";
+import { DebugPanel } from "@/components/chat/DebugPanel";
+import type { DebugEvent } from "@/hooks/useRealtimeSession";
 
 interface SessionSummary {
   id: string;
@@ -17,6 +19,11 @@ interface AppLayoutProps {
   sessions?: SessionSummary[];
   activeSessionId?: string;
   onSessionSelect?: (id: string) => void;
+  /** Debug panel state */
+  debugMode?: boolean;
+  onDebugModeChange?: (open: boolean) => void;
+  debugEvents?: DebugEvent[];
+  onClearDebugEvents?: () => void;
 }
 
 export function AppLayout({
@@ -26,6 +33,10 @@ export function AppLayout({
   sessions = [],
   activeSessionId,
   onSessionSelect,
+  debugMode = false,
+  onDebugModeChange,
+  debugEvents = [],
+  onClearDebugEvents,
 }: AppLayoutProps) {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
@@ -69,6 +80,14 @@ export function AppLayout({
 
         <div className="shrink-0 border-t">{audioControls}</div>
       </div>
+
+      {/* Debug drawer */}
+      <DebugPanel
+        open={debugMode}
+        onOpenChange={(open) => onDebugModeChange?.(open)}
+        events={debugEvents}
+        onClear={() => onClearDebugEvents?.()}
+      />
     </div>
   );
 }

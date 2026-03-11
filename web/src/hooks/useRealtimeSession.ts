@@ -36,6 +36,7 @@ export interface UseRealtimeSessionReturn {
   sendAudio: (base64: string) => void;
   commitAudioBuffer: () => void;
   debugEvents: DebugEvent[];
+  clearDebugEvents: () => void;
   rtClient: OpenAIRealtimeWebSocket | null;
   isSpeechActive: boolean;
   isResponding: boolean;
@@ -62,6 +63,10 @@ export function useRealtimeSession(): UseRealtimeSessionReturn {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+
+  const clearDebugEvents = useCallback(() => {
+    setDebugEvents([]);
+  }, []);
 
   const pushDebug = useCallback(
     (direction: "client" | "server", type: string, payload: unknown) => {
@@ -418,6 +423,7 @@ export function useRealtimeSession(): UseRealtimeSessionReturn {
     sendAudio,
     commitAudioBuffer,
     debugEvents,
+    clearDebugEvents,
     rtClient: rtRef.current,
     isSpeechActive,
     isResponding,

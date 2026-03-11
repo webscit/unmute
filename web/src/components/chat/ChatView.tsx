@@ -1,14 +1,29 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ChatMessage, type ChatMessageData } from "./ChatMessage";
+import { DebugEventItem } from "./DebugEvent";
+import type { DebugEvent } from "@/hooks/useRealtimeSession";
 
 interface ChatViewProps {
   messages: ChatMessageData[];
   /** Whether the assistant is currently speaking (speech activity indicator) */
   isSpeaking?: boolean;
+  /** When true, debug events are interleaved with messages */
+  debugMode?: boolean;
+  /** Debug events to interleave (only used when debugMode is true) */
+  debugEvents?: DebugEvent[];
 }
 
-export function ChatView({ messages, isSpeaking = false }: ChatViewProps) {
+type TimelineEntry =
+  | { kind: "message"; data: ChatMessageData }
+  | { kind: "event"; data: DebugEvent };
+
+export function ChatView({
+  messages,
+  isSpeaking = false,
+  debugMode = false,
+  debugEvents = [],
+}: ChatViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -20,12 +35,35 @@ export function ChatView({ messages, isSpeaking = false }: ChatViewProps) {
     isNearBottomRef.current = distanceFromBottom < 80;
   }
 
+  // Build interleaved timeline when debug mode is on
+  const timeline = useMemo<TimelineEntry[]>(() => {
+    if (!debugMode || debugEvents.length === 0) {
+      return messages.map((m) => ({ kind: "message" as const, data: m }));
+    }
+
+    const entries: TimelineEntry[] = [
+      ...messages.map((m) => ({ kind: "message" as const, data: m })),
+      ...debugEvents.map((e) => ({ kind: "event" as const, data: e })),
+    ];
+
+    entries.sort((a, b) => {
+      const ta = a.data.timestamp.getTime();
+      const tb = b.data.timestamp.getTime();
+      if (ta !== tb) return ta - tb;
+      // Messages before events at same timestamp
+      if (a.kind !== b.kind) return a.kind === "message" ? -1 : 1;
+      return 0;
+    });
+
+    return entries;
+  }, [messages, debugEvents, debugMode]);
+
   // Auto-scroll only if near bottom
   useEffect(() => {
     if (isNearBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages]);
+  }, [timeline]);
 
   return (
     <div className="flex flex-col h-full">
@@ -50,15 +88,22 @@ export function ChatView({ messages, isSpeaking = false }: ChatViewProps) {
           className="px-4 py-4"
           onScroll={handleScroll}
         >
-          {messages.length === 0 ? (
+          {timeline.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-muted-foreground text-sm gap-2">
               <p>No messages yet.</p>
               <p>Start a session and speak to begin.</p>
             </div>
           ) : (
-            messages.map((msg) => (
-              <ChatMessage key={msg.id} message={msg} />
-            ))
+            timeline.map((entry, i) =>
+              entry.kind === "message" ? (
+                <ChatMessage key={entry.data.id} message={entry.data} />
+              ) : (
+                <DebugEventItem
+                  key={`debug-${entry.data.timestamp.getTime()}-${i}`}
+                  event={entry.data}
+                />
+              ),
+            )
           )}
           <div ref={bottomRef} />
         </div>
