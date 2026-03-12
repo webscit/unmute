@@ -30,12 +30,13 @@ from unmute.exceptions import (
     make_ora_error,
 )
 from unmute.kyutai_constants import MAX_VOICE_FILE_SIZE_MB
-from unmute.services.health_service import check_session_admission, get_health
+from unmute.services.health_service import HealthStatus, check_session_admission, get_health
 from unmute.services.websocket_session_manager import WebSocketSessionManager
 from unmute.timer import Stopwatch
 from unmute.tts.voice_cloning import clone_voice
 from unmute.tts.voice_donation import (
     VoiceDonationSubmission,
+    VoiceDonationVerification,
     generate_verification,
     submit_voice_donation,
 )
@@ -77,14 +78,14 @@ app.add_middleware(
 
 
 @app.get("/")
-def root():
+def root() -> dict[str, str]:
     return {"message": "You've reached the Unmute backend server."}
 
 
 if PROFILE_ACTIVE:
 
     @app.get("/profile")
-    def profile():
+    def profile() -> HTMLResponse:
         if _last_profile is None:
             return HTMLResponse("<body>No last profiler saved</body>")
         else:
@@ -92,14 +93,14 @@ if PROFILE_ACTIVE:
 
 
 @app.get("/v1/health")
-async def health_endpoint():
+async def health_endpoint() -> HealthStatus:
     health = await get_health()
     mt.HEALTH_OK.observe(health.ok)
     return health
 
 
 @app.get("/healthz")
-async def liveness_probe():
+async def liveness_probe() -> dict[str, str]:
     """
     Liveness probe for Kubernetes.
     Returns 200 if the application is alive and running.
@@ -109,7 +110,7 @@ async def liveness_probe():
 
 
 @app.get("/readyz")
-async def readiness_probe():
+async def readiness_probe() -> dict[str, bool | str]:
     """
     Readiness probe for Kubernetes.
     Returns 200 if the system is ready to accept new sessions.
@@ -128,7 +129,7 @@ async def readiness_probe():
 
 @app.get("/v1/voices")
 @cache
-def voices():
+def voices() -> list[dict[str, object]]:
     voice_list = VoiceList()
     # Note that `voice.good` is bool | None, here we really take only True values.
     good_voices = [
@@ -167,7 +168,7 @@ app.add_middleware(
 
 
 @app.post("/v1/voices")
-async def post_voices(file: UploadFile):
+async def post_voices(file: UploadFile) -> dict[str, str]:
     """Upload a voice list file.
 
     Make sure the maximum file size is configured in uvicorn.
@@ -177,7 +178,7 @@ async def post_voices(file: UploadFile):
 
 
 @app.get("/v1/voice-donation")
-async def get_voice_donation():
+async def get_voice_donation() -> VoiceDonationVerification:
     """Initiate a voice donation by asking for a verification text."""
     verification = generate_verification()
     return verification
@@ -194,7 +195,7 @@ app.add_middleware(
 async def post_voice_donation(
     file: UploadFile = File(...),  # noqa: B008
     metadata: str = Form(...),
-):
+) -> dict[str, object]:
     """Finish a voice donation."""
     file_bytes = file.file.read()
 
@@ -217,7 +218,7 @@ async def post_voice_donation(
 
 
 @app.websocket("/v1/realtime")
-async def websocket_route(websocket: WebSocket):
+async def websocket_route(websocket: WebSocket) -> None:
     global _last_profile, _current_profile
 
     # Perform handshake validation before accepting
@@ -282,7 +283,7 @@ async def websocket_route(websocket: WebSocket):
             mt.SESSION_DURATION.observe(session_watch.time())
 
 
-async def _report_websocket_exception(websocket: WebSocket, exc: Exception):
+async def _report_websocket_exception(websocket: WebSocket, exc: Exception) -> None:
     if isinstance(exc, ExceptionGroup):
         exceptions = exc.exceptions
     else:
@@ -328,7 +329,7 @@ async def _report_websocket_exception(websocket: WebSocket, exc: Exception):
             logger.warning("Socket already closed.")
 
 
-def _cors_headers_for_error(request: Request):
+def _cors_headers_for_error(request: Request) -> dict[str, str]:
     origin = request.headers.get("origin")
     allow_origin = origin if origin in CORS_ALLOW_ORIGINS else None
     headers = {"Access-Control-Allow-Credentials": "true"}
@@ -339,7 +340,7 @@ def _cors_headers_for_error(request: Request):
 
 
 @app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     # We need this so that CORS header are added even when the route raises an
     # exception. Otherwise you get a confusing CORS error even if the issue is totally
     # unrelated.
@@ -351,7 +352,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 @app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
+async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     # We need this so that CORS header are added even when the route raises an
     # exception. Otherwise you get a confusing CORS error even if the issue is totally
     # unrelated.
