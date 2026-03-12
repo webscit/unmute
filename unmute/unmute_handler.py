@@ -135,7 +135,7 @@ class UnmuteHandler(AsyncStreamHandler):
         else:
             self.audio_input_override = None
 
-    async def cleanup(self):
+    async def cleanup(self) -> None:
         if self.recorder is not None:
             await self.recorder.shutdown()
 
@@ -155,7 +155,7 @@ class UnmuteHandler(AsyncStreamHandler):
             return None
         return cast(Quest[TextToSpeech], quest).get_nowait()
 
-    def get_gradio_update(self):
+    def get_gradio_update(self) -> AdditionalOutputs:
         self.debug_dict["conversation_state"] = self.chatbot.conversation_state()
         self.debug_dict["connection"]["stt"] = self.stt.state() if self.stt else "none"
         self.debug_dict["connection"]["tts"] = self.tts.state() if self.tts else "none"
@@ -186,7 +186,7 @@ class UnmuteHandler(AsyncStreamHandler):
         delta: str,
         role: Literal["user", "assistant"],
         generating_message_i: int | None = None,  # Avoid race conditions
-    ):
+    ) -> bool:
         is_new_message = await self.chatbot.add_chat_message_delta(
             delta, role, generating_message_i=generating_message_i
         )
@@ -195,7 +195,7 @@ class UnmuteHandler(AsyncStreamHandler):
 
     async def _generate_response(
         self, instructions_override: str | None = None
-    ):
+    ) -> None:
         # Empty message to signal we've started responding.
         # Do it here in the lock to avoid race conditions
         await self.add_chat_message_delta("", "assistant")
@@ -209,7 +209,7 @@ class UnmuteHandler(AsyncStreamHandler):
 
     async def _generate_response_task(
         self, instructions_override: str | None = None
-    ):
+    ) -> None:
         generating_message_i = len(self.chatbot.chat_history)
 
         # Generate IDs for response and output item
@@ -277,7 +277,7 @@ class UnmuteHandler(AsyncStreamHandler):
         llm: VLLMStream,
         messages: list[dict[str, Any]],
         llm_stopwatch: Stopwatch,
-    ):
+    ) -> None:
         """Generate a text-only response with TTS."""
         # Create and track output item
         output_item = ora.Item(
@@ -443,7 +443,7 @@ class UnmuteHandler(AsyncStreamHandler):
         tools: list[dict[str, Any]],
         tool_choice: str,
         llm_stopwatch: Stopwatch,
-    ):
+    ) -> None:
         """Generate a response that may include function calls.
 
         When the LLM returns tool_calls, emits function_call items and arguments.
@@ -823,20 +823,20 @@ class UnmuteHandler(AsyncStreamHandler):
             else:
                 return None
 
-    def copy(self):
+    def copy(self) -> "UnmuteHandler":
         return UnmuteHandler()
 
     async def __aenter__(self) -> None:
         await self.quest_manager.__aenter__()
 
-    async def start_up(self):
+    async def start_up(self) -> None:
         await self.start_up_stt()
         self.waiting_for_user_start_time = self.audio_received_sec()
 
-    async def __aexit__(self, *exc: Any) -> None:
+    async def __aexit__(self, *exc: Any) -> bool | None:
         return await self.quest_manager.__aexit__(*exc)
 
-    async def start_up_stt(self):
+    async def start_up_stt(self) -> None:
         async def _init() -> SpeechToText:
             return await find_instance("stt", SpeechToText)
 
@@ -850,7 +850,7 @@ class UnmuteHandler(AsyncStreamHandler):
         # We want to be sure to have the STT before starting anything.
         await quest.get()
 
-    async def _stt_loop(self, stt: SpeechToText):
+    async def _stt_loop(self, stt: SpeechToText) -> None:
         last_word_time = None
         try:
             async for data in stt:
@@ -938,7 +938,7 @@ class UnmuteHandler(AsyncStreamHandler):
 
         return await self.quest_manager.add(Quest("tts", _init, _run, _close))
 
-    async def _tts_loop(self, tts: TextToSpeech, generating_message_i: int):
+    async def _tts_loop(self, tts: TextToSpeech, generating_message_i: int) -> None:
         # On interruption, we swap the output queue. This will ensure that this worker
         # can never accidentally push to the new queue if it's interrupted.
         output_queue = self.output_queue
@@ -1013,7 +1013,7 @@ class UnmuteHandler(AsyncStreamHandler):
         await self.check_for_bot_goodbye()
         self.waiting_for_user_start_time = self.audio_received_sec()
 
-    async def interrupt_bot(self):
+    async def interrupt_bot(self) -> None:
         if self.chatbot.conversation_state() != "bot_speaking":
             raise RuntimeError(
                 "Can't interrupt bot when conversation state is "
@@ -1042,7 +1042,7 @@ class UnmuteHandler(AsyncStreamHandler):
         await self.quest_manager.remove("tts")
         await self.quest_manager.remove("llm")
 
-    async def check_for_bot_goodbye(self):
+    async def check_for_bot_goodbye(self) -> None:
         last_assistant_message = next(
             (
                 msg
@@ -1059,7 +1059,7 @@ class UnmuteHandler(AsyncStreamHandler):
                 CloseStream("The assistant ended the conversation. Bye!")
             )
 
-    async def detect_long_silence(self):
+    async def detect_long_silence(self) -> None:
         """Handle situations where the user doesn't answer for a while."""
         if (
             self.chatbot.conversation_state() == "waiting_for_user"
@@ -1204,7 +1204,7 @@ class UnmuteHandler(AsyncStreamHandler):
         """Clear the input audio buffer without committing."""
         await self.audio_buffer_handler.clear_audio_buffer()
 
-    async def update_session(self, session: ora.Session | dict[str, Any]):
+    async def update_session(self, session: ora.Session | dict[str, Any]) -> None:
         # Handle both Session objects and dict-based configs
         if isinstance(session, dict):
             instructions = session.get("instructions")
