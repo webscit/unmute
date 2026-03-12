@@ -10,6 +10,7 @@ import { SessionSidebar } from "@/components/layout/SessionSidebar";
 import { ChatView } from "@/components/chat/ChatView";
 import { AudioControls } from "@/components/audio/AudioControls";
 import {
+  SettingsDialog,
   type SettingsValues,
 } from "@/components/settings/SettingsDialog";
 import type { ChatMessageRecord } from "@/lib/db/chat-db";
@@ -17,14 +18,16 @@ import type { ChatMessageRecord } from "@/lib/db/chat-db";
 const DEFAULT_SETTINGS: SettingsValues = {
   voice: "alloy",
   customInstructions: "",
-  backendUrl: "",
+  backendUrl: "/api",
+  apiKey: "",
+  model: "gpt-4o-realtime-preview",
 };
 
 function App() {
   // ---- State ----
   const [debugMode, setDebugMode] = useState(false);
-  const [, setSettingsOpen] = useState(false);
-  const [settings, ] = useState<SettingsValues>(DEFAULT_SETTINGS);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState<SettingsValues>(DEFAULT_SETTINGS);
 
   // ---- Hooks ----
   const session = useRealtimeSession();
@@ -119,6 +122,7 @@ function App() {
   const isConnected = session.connectionStatus === "connected";
 
   return (
+    <>
     <AppLayout
       sidebar={
         <SessionSidebar
@@ -142,6 +146,7 @@ function App() {
           isSpeaking={session.isResponding}
           debugMode={debugMode}
           debugEvents={session.debugEvents}
+          onClearDebugEvents={session.clearDebugEvents}
         />
       }
       audioControls={
@@ -158,6 +163,14 @@ function App() {
       debugEvents={session.debugEvents}
       onClearDebugEvents={session.clearDebugEvents}
     />
+
+    <SettingsDialog
+      open={settingsOpen}
+      onOpenChange={setSettingsOpen}
+      values={settings}
+      onChange={setSettings}
+    />
+    </>
   );
 }
 

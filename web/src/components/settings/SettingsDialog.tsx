@@ -12,6 +12,8 @@ export interface SettingsValues {
   voice: string;
   customInstructions: string;
   backendUrl: string;
+  apiKey: string;
+  model: string;
 }
 
 interface SettingsDialogProps {
@@ -76,6 +78,33 @@ export function SettingsDialog({
             />
           </div>
 
+          {/* API Key */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium" htmlFor="api-key">
+              API Key
+            </label>
+            <Input
+              id="api-key"
+              type="password"
+              value={values.apiKey}
+              onChange={(e) => update({ apiKey: e.target.value })}
+              placeholder="OpenAI API key (or leave empty for proxied setups)"
+            />
+          </div>
+
+          {/* Model */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium" htmlFor="model-select">
+              Model
+            </label>
+            <Input
+              id="model-select"
+              value={values.model}
+              onChange={(e) => update({ model: e.target.value })}
+              placeholder="gpt-4o-realtime-preview"
+            />
+          </div>
+
           {/* Backend URL override */}
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium" htmlFor="backend-url">
@@ -86,7 +115,7 @@ export function SettingsDialog({
               type="url"
               value={values.backendUrl}
               onChange={(e) => update({ backendUrl: e.target.value })}
-              placeholder={import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8000"}
+              placeholder={import.meta.env.VITE_BACKEND_URL ?? "/api"}
             />
           </div>
         </div>

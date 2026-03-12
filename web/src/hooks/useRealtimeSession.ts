@@ -93,9 +93,9 @@ export function useRealtimeSession(): UseRealtimeSessionReturn {
 
       try {
         const rt = await createRealtimeClient({
-          apiKey: "placeholder",
+          apiKey: settings.apiKey || "placeholder",
           baseURL: settings.backendUrl || undefined,
-          model: "gpt-4o-realtime-preview",
+          model: settings.model || "gpt-4o-realtime-preview",
         });
         rtRef.current = rt;
 

@@ -1,5 +1,9 @@
-import { useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { Filter, Trash2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { ChatMessage, type ChatMessageData } from "./ChatMessage";
 import { DebugEventItem } from "./DebugEvent";
 import type { DebugEvent } from "@/hooks/useRealtimeSession";
@@ -12,6 +16,8 @@ interface ChatViewProps {
   debugMode?: boolean;
   /** Debug events to interleave (only used when debugMode is true) */
   debugEvents?: DebugEvent[];
+  /** Callback to clear debug events */
+  onClearDebugEvents?: () => void;
 }
 
 type TimelineEntry =
@@ -23,7 +29,9 @@ export function ChatView({
   isSpeaking = false,
   debugMode = false,
   debugEvents = [],
+  onClearDebugEvents,
 }: ChatViewProps) {
+  const [filter, setFilter] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -35,15 +43,22 @@ export function ChatView({
     isNearBottomRef.current = distanceFromBottom < 80;
   }
 
+  // Filter debug events
+  const filteredDebugEvents = useMemo(() => {
+    if (!filter) return debugEvents;
+    const lower = filter.toLowerCase();
+    return debugEvents.filter((e) => e.type.toLowerCase().includes(lower));
+  }, [debugEvents, filter]);
+
   // Build interleaved timeline when debug mode is on
   const timeline = useMemo<TimelineEntry[]>(() => {
-    if (!debugMode || debugEvents.length === 0) {
+    if (!debugMode || filteredDebugEvents.length === 0) {
       return messages.map((m) => ({ kind: "message" as const, data: m }));
     }
 
     const entries: TimelineEntry[] = [
       ...messages.map((m) => ({ kind: "message" as const, data: m })),
-      ...debugEvents.map((e) => ({ kind: "event" as const, data: e })),
+      ...filteredDebugEvents.map((e) => ({ kind: "event" as const, data: e })),
     ];
 
     entries.sort((a, b) => {
@@ -56,7 +71,7 @@ export function ChatView({
     });
 
     return entries;
-  }, [messages, debugEvents, debugMode]);
+  }, [messages, filteredDebugEvents, debugMode]);
 
   // Auto-scroll only if near bottom
   useEffect(() => {
@@ -67,6 +82,33 @@ export function ChatView({
 
   return (
     <div className="flex flex-col h-full">
+      {debugMode && (
+        <div className="flex items-center gap-2 px-4 py-2 border-b bg-muted/50 shrink-0">
+          <div className="relative flex-1">
+            <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Filter by event type..."
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className="pl-8 h-8 text-xs"
+            />
+          </div>
+          <Badge variant="secondary" className="text-xs shrink-0">
+            {filteredDebugEvents.length}
+            {filter && ` / ${debugEvents.length}`}
+          </Badge>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            onClick={onClearDebugEvents}
+            aria-label="Clear all events"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
+
       {isSpeaking && (
         <div className="flex items-center gap-2 px-4 py-1.5 bg-primary/10 text-primary text-xs font-medium border-b border-primary/20">
           <span className="flex gap-0.5">
