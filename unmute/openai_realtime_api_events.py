@@ -166,6 +166,12 @@ class InputAudioBufferClear(BaseEvent[Literal["input_audio_buffer.clear"]]):
     pass
 
 
+class OutputAudioBufferClear(BaseEvent[Literal["output_audio_buffer.clear"]]):
+    """Clear the server's audio output buffer."""
+
+    pass
+
+
 class UnmuteInputAudioBufferAppendAnonymized(
     BaseEvent[Literal["unmute.input_audio_buffer.append_anonymized"]]
 ):
@@ -705,6 +711,8 @@ ClientEvent = Union[
     ConversationItemDelete,
     ConversationItemRetrieve,
     ConversationItemTruncate,
+    # Output audio buffer events
+    OutputAudioBufferClear,
     # Response events
     ResponseCreate,
     ResponseCancel,
